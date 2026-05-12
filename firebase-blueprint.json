@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the PBL Management System",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["Mahasiswa", "Admin", "DosenPembimbing", "DosenPenguji", "PembimbingLapangan"] },
+        "account_status": { "type": "string", "enum": ["Pending", "Active", "Blocked"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "role", "account_status", "createdAt"]
+    },
+    "PBLGroup": {
+      "title": "PBL Group",
+      "description": "A group of students assigned to a PBL project",
+      "type": "object",
+      "properties": {
+        "group_name": { "type": "string" },
+        "dsn_pembimbing_id": { "type": "string", "description": "UID of Dosen Pembimbing" },
+        "pmb_lapangan_id": { "type": "string", "description": "UID of Pembimbing Lapangan" },
+        "status": { "type": "string", "enum": ["Draft", "Active", "Exam", "Completed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_name", "status", "createdAt"]
+    },
+    "GroupMember": {
+      "title": "Group Member",
+      "description": "A student assigned to a PBL group",
+      "type": "object",
+      "properties": {
+        "group_id": { "type": "string" },
+        "student_id": { "type": "string" },
+        "krs_document_url": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_id", "student_id", "status", "createdAt"]
+    },
+    "Logbook": {
+      "title": "Logbook Entry",
+      "description": "Daily logbook entry by a student",
+      "type": "object",
+      "properties": {
+        "group_member_id": { "type": "string" },
+        "student_id": { "type": "string" },
+        "activity_date": { "type": "string", "format": "date" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Approved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_member_id", "student_id", "activity_date", "description", "status", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Attendance Record",
+      "description": "Attendance record for a student",
+      "type": "object",
+      "properties": {
+        "group_member_id": { "type": "string" },
+        "student_id": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "type": { "type": "string", "enum": ["Sosialisasi", "Lapangan"] },
+        "is_present": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_member_id", "student_id", "date", "type", "is_present", "createdAt"]
+    },
+    "ExamSchedule": {
+      "title": "Exam Schedule",
+      "description": "Schedule for a group's PBL exam",
+      "type": "object",
+      "properties": {
+        "group_id": { "type": "string" },
+        "dsn_penguji_id": { "type": "string" },
+        "scheduled_at": { "type": "string", "format": "date-time" },
+        "room": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_id", "dsn_penguji_id", "scheduled_at", "room", "createdAt"]
+    },
+    "Grade": {
+      "title": "Grade",
+      "description": "Grade given to a student",
+      "type": "object",
+      "properties": {
+        "group_member_id": { "type": "string" },
+        "student_id": { "type": "string" },
+        "evaluator_id": { "type": "string" },
+        "category": { "type": "string", "enum": ["Sosialisasi", "Lapangan", "PeerReview", "DosenPembimbing", "DosenPenguji"] },
+        "score": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_member_id", "student_id", "evaluator_id", "category", "score", "createdAt"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "Document uploaded by a group",
+      "type": "object",
+      "properties": {
+        "group_id": { "type": "string" },
+        "doc_type": { "type": "string", "enum": ["Draft", "Revised", "Final"] },
+        "file_url": { "type": "string" },
+        "is_approved_pembimbing": { "type": "boolean" },
+        "is_approved_penguji": { "type": "boolean" },
+        "is_validated_admin": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_id", "doc_type", "file_url", "is_approved_pembimbing", "is_approved_penguji", "is_validated_admin", "createdAt"]
+    },
+    "GroupDiscussion": {
+      "title": "Group Discussion",
+      "description": "Chat messages in a PBL group",
+      "type": "object",
+      "properties": {
+        "group_id": { "type": "string" },
+        "author_id": { "type": "string" },
+        "author_name": { "type": "string" },
+        "author_role": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["group_id", "author_id", "author_name", "author_role", "message", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Announcement or News for Landing Page",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["Pengumuman", "Berita"] },
+        "date": { "type": "string", "format": "date-time" },
+        "author_id": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "type", "date", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "pbl_groups/{groupId}": {
+      "schema": { "$ref": "#/entities/PBLGroup" },
+      "description": "PBL Groups"
+    },
+    "group_members/{memberId}": {
+      "schema": { "$ref": "#/entities/GroupMember" },
+      "description": "Group Members"
+    },
+    "logbooks/{logbookId}": {
+      "schema": { "$ref": "#/entities/Logbook" },
+      "description": "Logbook Entries"
+    },
+    "attendances/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "Attendance Records"
+    },
+    "exam_schedules/{scheduleId}": {
+      "schema": { "$ref": "#/entities/ExamSchedule" },
+      "description": "Exam Schedules"
+    },
+    "grades/{gradeId}": {
+      "schema": { "$ref": "#/entities/Grade" },
+      "description": "Grades"
+    },
+    "documents/{documentId}": {
+      "schema": { "$ref": "#/entities/Document" },
+      "description": "Documents"
+    },
+    "group_discussions/{discussionId}": {
+      "schema": { "$ref": "#/entities/GroupDiscussion" },
+      "description": "Group discussions"
+    },
+    "announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Announcements and News"
+    }
+  }
+}

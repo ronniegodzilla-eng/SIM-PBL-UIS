@@ -1,0 +1,354 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(roleName) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().role == roleName;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "ronniegodzilla@gmail.com" ||
+        hasRole('Admin')
+      );
+    }
+
+    function isAdminProdi() {
+      return hasRole('AdminProdi');
+    }
+
+    function isAnyAdmin() {
+      return isSuperAdmin() || isAdminProdi();
+    }
+
+    function isDosenPembimbing() {
+      return hasRole('DosenPembimbing') || hasRole('Dosen');
+    }
+
+    function isDosenPenguji() {
+      return hasRole('DosenPenguji') || hasRole('Dosen');
+    }
+
+    function isPembimbingLapangan() {
+      return hasRole('PembimbingLapangan');
+    }
+
+    function isMahasiswa() {
+      return hasRole('Mahasiswa');
+    }
+
+    function isActiveUser() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().account_status == 'Active';
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'role', 'account_status', 'createdAt']) &&
+             data.uid is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.role in ['Mahasiswa', 'Admin', 'AdminProdi', 'DosenPembimbing', 'DosenPenguji', 'PembimbingLapangan', 'Dosen'] &&
+             data.account_status in ['Pending', 'Active', 'Blocked'] &&
+             (!('mustChangePassword' in data) || data.mustChangePassword is bool) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('prodi' in data) || data.prodi in ['S1 Kesehatan dan Keselamatan Kerja', 'S1 Kesehatan Lingkungan']) &&
+             (!('jalur' in data) || data.jalur in ['Reg A', 'Reg B', 'Reg C', 'RPL']) &&
+             (!('is_grade_published' in data) || data.is_grade_published is bool) &&
+             (!('final_score' in data) || data.final_score is number) &&
+             (!('letter_grade' in data) || data.letter_grade is string) &&
+             (!('id_number' in data) || data.id_number is string) &&
+             data.createdAt is string;
+    }
+
+    function isValidPBLGroup(data) {
+      return data.keys().hasAll(['group_name', 'status', 'createdAt']) &&
+             data.group_name is string && data.group_name.size() > 0 && data.group_name.size() < 100 &&
+             (!('dsn_pembimbing_id' in data) || data.dsn_pembimbing_id is string) &&
+             (!('pmb_lapangan_id' in data) || data.pmb_lapangan_id is string || data.pmb_lapangan_id == null) &&
+             (!('prodi' in data) || data.prodi in ['S1 Kesehatan dan Keselamatan Kerja', 'S1 Kesehatan Lingkungan'] || data.prodi == null) &&
+             (!('tempat_pbl' in data) || data.tempat_pbl is string || data.tempat_pbl == null) &&
+             (!('leader_id' in data) || data.leader_id is string || data.leader_id == null) &&
+             (!('dp_hadir_pembukaan' in data) || data.dp_hadir_pembukaan is bool) &&
+             (!('dp_hadir_penutupan' in data) || data.dp_hadir_penutupan is bool) &&
+             (!('dp_hadir_pengabdian' in data) || data.dp_hadir_pengabdian is bool) &&
+             data.status in ['Draft', 'Active', 'Exam', 'Completed'] &&
+             data.createdAt is string;
+    }
+
+    function isValidGroupMember(data) {
+      return data.keys().hasAll(['group_id', 'student_id', 'status', 'createdAt']) &&
+             data.group_id is string &&
+             data.student_id is string &&
+             (!('krs_document_url' in data) || data.krs_document_url is string) &&
+             data.status in ['Pending', 'Approved', 'Rejected'] &&
+             data.createdAt is string;
+    }
+
+    function isValidLogbook(data) {
+      return data.keys().hasAll(['group_member_id', 'student_id', 'activity_date', 'description', 'status', 'createdAt']) &&
+             data.group_member_id is string &&
+             data.student_id is string &&
+             data.activity_date is string &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
+             data.status in ['Pending', 'Approved'] &&
+             data.createdAt is string;
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['group_member_id', 'student_id', 'date', 'type', 'is_present', 'createdAt']) &&
+             data.group_member_id is string &&
+             data.student_id is string &&
+             data.date is string &&
+             data.type in ['Sosialisasi', 'Lapangan'] &&
+             data.is_present is bool &&
+             (!('status' in data) || data.status in ['Pending', 'Approved']) &&
+             data.createdAt is string;
+    }
+
+    function isValidExamSchedule(data) {
+      return data.keys().hasAll(['group_id', 'penguji_id', 'date', 'time', 'room', 'status', 'createdAt']) &&
+             data.group_id is string &&
+             data.penguji_id is string &&
+             data.date is string &&
+             data.time is string &&
+             data.room is string && data.room.size() > 0 && data.room.size() < 100 &&
+             data.status in ['Scheduled', 'Completed', 'Cancelled'] &&
+             data.createdAt is string;
+    }
+
+    function isValidPBLReport(data) {
+      return data.keys().hasAll(['group_id', 'report_url', 'status', 'createdAt']) &&
+             data.group_id is string &&
+             data.report_url is string &&
+             (!('approval_url' in data) || data.approval_url is string) &&
+             data.status in ['Draft', 'Pending', 'Approved', 'Revisi'] &&
+             (!('report_title' in data) || data.report_title is string) &&
+             (!('feedback_url' in data) || data.feedback_url is string) &&
+             (!('feedback_text' in data) || data.feedback_text is string) &&
+             (!('custom_exam_urls' in data) || data.custom_exam_urls is map || data.custom_exam_urls == null) &&
+             (!('custom_revisi_urls' in data) || data.custom_revisi_urls is map || data.custom_revisi_urls == null) &&
+             (!('revisi_status' in data) || data.revisi_status in ['Pending', 'Approved', 'Revisi']) &&
+             (!('revisi_submitted_at' in data) || data.revisi_submitted_at is string) &&
+             (!('history' in data) || data.history is list) &&
+             data.createdAt is string;
+    }
+
+    function isValidBeritaAcara(data) {
+      return data.keys().hasAll(['group_id', 'dosen_id', 'type', 'date', 'time', 'location', 'notes', 'attendances', 'createdAt', 'updatedAt']) &&
+             data.group_id is string &&
+             data.dosen_id is string &&
+             data.type in ['Pembukaan', 'Penutupan', 'Ujian', 'Pengabdian pada Masyarakat'] &&
+             data.date is string &&
+             data.time is string &&
+             data.location is string &&
+             data.notes is string &&
+             data.attendances is map &&
+             (!('dokumentasi_url' in data) || data.dokumentasi_url is string) &&
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    function isValidGrade(data) {
+      return data.keys().hasAll(['group_member_id', 'student_id', 'evaluator_id', 'category', 'score', 'createdAt']) &&
+             data.group_member_id is string &&
+             data.student_id is string &&
+             data.evaluator_id is string &&
+             data.category in ['Sosialisasi', 'Lapangan', 'PembimbingLapangan', 'PeerReview', 'DosenPembimbing', 'DosenPenguji'] &&
+             data.score is number && data.score >= 0 && data.score <= 100 &&
+             (!('rubric_scores' in data) || data.rubric_scores is map) &&
+             data.createdAt is string;
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['group_id', 'doc_type', 'file_url', 'is_approved_pembimbing', 'is_approved_penguji', 'is_validated_admin', 'createdAt']) &&
+             data.group_id is string &&
+             data.doc_type in ['Draft', 'Revised', 'Final'] &&
+             data.file_url is string && data.file_url.size() > 0 && data.file_url.size() < 1000 &&
+             data.is_approved_pembimbing is bool &&
+             data.is_approved_penguji is bool &&
+             data.is_validated_admin is bool &&
+             data.createdAt is string;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['title', 'content', 'type', 'date', 'createdAt']) &&
+             data.title is string && data.title.size() > 0 &&
+             data.content is string &&
+             data.type in ['Pengumuman', 'Berita'];
+    }
+
+    function isValidGroupDiscussion(data) {
+      return data.keys().hasAll(['group_id', 'author_id', 'author_name', 'author_role', 'message', 'createdAt']) &&
+             data.group_id is string &&
+             data.author_id is string &&
+             data.author_name is string &&
+             data.author_role is string &&
+             data.message is string && data.message.size() < 5000 &&
+             data.createdAt is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Anyone can read users (needed for public landing page names/roles)
+      allow read: if true;
+      // Users can create their own profile (Mahasiswa registers as Pending). Admin can create any. AdminProdi can create staff.
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
+        (isOwner(userId) && request.resource.data.role == 'Mahasiswa' && request.resource.data.account_status == 'Pending') ||
+        isSuperAdmin() ||
+        (isAdminProdi() && !(request.resource.data.role in ['Admin', 'AdminProdi']))
+      );
+      // Only Admin can update roles/status. Users can update their own name.
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isSuperAdmin() ||
+        (isAdminProdi() && !(request.resource.data.role in ['Admin', 'AdminProdi']) && !(resource.data.role in ['Admin', 'AdminProdi'])) ||
+        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.account_status == resource.data.account_status)
+      );
+      allow delete: if isSuperAdmin() || (isAdminProdi() && !(resource.data.role in ['Admin', 'AdminProdi']));
+    }
+
+    match /pbl_groups/{groupId} {
+      // Public read for landing page
+      allow read: if true;
+      allow create: if isAnyAdmin() && isValidPBLGroup(request.resource.data);
+      allow update: if isValidPBLGroup(request.resource.data) && (
+        isAnyAdmin() ||
+        (isMahasiswa() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tempat_pbl']))
+      );
+      allow delete: if isAnyAdmin();
+    }
+
+    match /group_members/{memberId} {
+      allow read: if true;
+      // Mahasiswa can apply to a group
+      allow create: if isActiveUser() && isValidGroupMember(request.resource.data) && (
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isAnyAdmin()
+      );
+      allow update: if isAuthenticated() && isValidGroupMember(request.resource.data) && (
+        isAnyAdmin() ||
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status)
+      );
+      allow delete: if isAnyAdmin();
+    }
+
+    match /logbooks/{logbookId} {
+      // Public read for aggregate stats
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isSuperAdmin());
+      allow update: if isAuthenticated() && isValidLogbook(request.resource.data) && (
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
+        isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()
+      );
+      allow delete: if isAnyAdmin() || (isMahasiswa() && resource.data.student_id == request.auth.uid);
+    }
+
+    match /attendances/{attendanceId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isAnyAdmin()
+      );
+      allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isPembimbingLapangan() || isAnyAdmin()
+      );
+      allow delete: if isAnyAdmin();
+    }
+
+    match /exam_schedules/{scheduleId} {
+      allow read: if true;
+      allow create, update: if isAnyAdmin() && isValidExamSchedule(request.resource.data);
+      allow delete: if isAnyAdmin();
+    }
+
+    match /pbl_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPBLReport(request.resource.data) && (
+        isAnyAdmin() || 
+        (isMahasiswa() && request.resource.data.status in ['Draft', 'Pending'])
+      );
+      allow update: if isAuthenticated() && isValidPBLReport(request.resource.data) && (
+        isAnyAdmin() || 
+        isDosenPembimbing() || 
+        (isMahasiswa() && (resource.data.status != 'Approved' || (request.resource.data.status == 'Pending' && request.resource.data.approval_url != '')) && resource.data.revisi_status != 'Approved')
+      );
+      allow delete: if isAnyAdmin();
+    }
+
+    match /grades/{gradeId} {
+      allow read: if isAuthenticated();
+      allow create: if isActiveUser() && isValidGrade(request.resource.data) && (request.resource.data.evaluator_id == request.auth.uid || isSuperAdmin());
+      allow update: if isActiveUser() && isValidGrade(request.resource.data) && (request.resource.data.evaluator_id == request.auth.uid || isSuperAdmin()) && (resource.data.evaluator_id == request.auth.uid || isSuperAdmin());
+      allow delete: if isAnyAdmin();
+    }
+
+    match /berita_acara/{beritaId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBeritaAcara(request.resource.data) && (request.resource.data.dosen_id == request.auth.uid || isSuperAdmin());
+      allow update: if isAuthenticated() && isValidBeritaAcara(request.resource.data) && (resource.data.dosen_id == request.auth.uid || isSuperAdmin());
+      allow delete: if isAnyAdmin() || (resource.data.dosen_id == request.auth.uid);
+    }
+
+    function isValidRubric(data) {
+      return data.keys().hasAll(['role', 'criteria', 'updatedAt']) &&
+             data.role in ['DosenPembimbing', 'DosenPenguji', 'PembimbingLapangan', 'PeerReview'] &&
+             data.criteria is list &&
+             data.updatedAt is string;
+    }
+
+    match /rubrics/{rubricId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAnyAdmin() && isValidRubric(request.resource.data);
+      allow delete: if isAnyAdmin();
+    }
+
+    match /documents/{documentId} {
+      allow read: if isAuthenticated();
+      allow create: if isActiveUser() && isValidDocument(request.resource.data);
+      allow update: if isAuthenticated() && isValidDocument(request.resource.data) && (
+        isMahasiswa() || isDosenPembimbing() || isDosenPenguji() || isAnyAdmin()
+      );
+      allow delete: if isAnyAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAnyAdmin();
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow create, update: if isAnyAdmin() && isValidAnnouncement(request.resource.data);
+      allow delete: if isAnyAdmin();
+    }
+
+    match /group_discussions/{discussionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.author_id == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (isAnyAdmin() || request.auth.uid == resource.data.author_id);
+    }
+  }
+}
