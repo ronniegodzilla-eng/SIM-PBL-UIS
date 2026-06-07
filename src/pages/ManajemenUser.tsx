@@ -255,6 +255,9 @@ export const ManajemenUser = () => {
                 <TableHead className="cursor-pointer" onClick={() => handleSort('account_status')}>
                   Status <SortIcon field="account_status" />
                 </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort('lastLogin' as keyof UserProfile)}>
+                  Terakhir Login <SortIcon field={'lastLogin' as keyof UserProfile} />
+                </TableHead>
                 <TableHead className="text-right">Aksi</TableHead>
               </TableRow>
             </TableHeader>
@@ -268,6 +271,12 @@ export const ManajemenUser = () => {
                     <Badge variant={u.account_status === 'Active' ? 'default' : 'secondary'}>
                       {u.account_status}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-slate-500">
+                    {u.lastLogin ? new Date(u.lastLogin).toLocaleString('id-ID', {
+                      day: '2-digit', month: 'short', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit'
+                    }) : '-'}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">

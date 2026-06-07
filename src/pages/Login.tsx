@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { loginWithGoogle, db, auth } from '../firebase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -45,6 +45,9 @@ export const Login = () => {
           toast.error('Akun Anda telah diblokir.');
           auth.signOut();
         } else {
+          await updateDoc(userDocRef, {
+            lastLogin: new Date().toISOString()
+          });
           toast.success('Login berhasil!');
           navigate('/dashboard');
         }
