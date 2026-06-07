@@ -17,6 +17,7 @@ export interface UserProfile {
   prodi?: ProgramStudi;
   jalur?: Jalur;
   createdAt: string;
+  lastLogin?: string;
 }
 
 interface AuthContextType {
@@ -61,13 +62,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userDocRef = doc(db, 'users', currentUser.uid);
           
           // Initial auto-upgrade check
-          if (currentUser.email === 'ronniegodzilla@gmail.com') {
+          if (currentUser.email === 'ronniegodzilla@gmail.com' || currentUser.email === 'admin@uis.ac.id') {
              const snap = await getDoc(userDocRef);
              if (snap.exists()) {
                  const data = snap.data();
                  if (data.role !== 'Admin' || data.account_status !== 'Active') {
                      await setDoc(userDocRef, { ...data, role: 'Admin', account_status: 'Active' }, { merge: true });
                  }
+             } else {
+                 // Create initial admin doc if it doesn't exist
+                 await setDoc(userDocRef, {
+                   uid: currentUser.uid,
+                   name: "Super Admin",
+                   email: currentUser.email,
+                   role: 'Admin',
+                   account_status: 'Active',
+                   createdAt: new Date().toISOString()
+                 });
              }
           }
 
