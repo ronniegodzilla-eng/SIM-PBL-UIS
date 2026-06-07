@@ -47,7 +47,7 @@ export const Penilaian = () => {
        // Usually they are assigned specifically. We'll map Dosen generically to DosenPembimbing's rubric
        setGraderRoleKey(roleName === 'Dosen' ? 'DosenPembimbing' : roleName);
     } else if (roleName === 'Admin' || roleName === 'AdminProdi') {
-       setGraderRoleKey('KehadiranSosialisasi');
+       setGraderRoleKey('Sosialisasi');
     } else {
        setGraderRoleKey('DosenPenguji');
     }
@@ -203,12 +203,12 @@ export const Penilaian = () => {
     if (!profile) return;
     try {
       const mem = groupMembers.find(m => m.student_id === student.id);
-      const gradeId = `${student.id}_KehadiranSosialisasi`;
+      const gradeId = `${student.id}_Sosialisasi`;
       await setDoc(doc(db, 'grades', gradeId), {
         student_id: student.id,
         group_member_id: mem?.id,
         evaluator_id: profile.uid,
-        category: 'KehadiranSosialisasi',
+        category: 'Sosialisasi',
         score: score,
         rubric_scores: { kehadiran: score },
         createdAt: new Date().toISOString()
@@ -268,6 +268,9 @@ export const Penilaian = () => {
           const m2 = groupMembers.find(m => m.student_id === b.id);
           const g2 = groups.find(g => g.id === m2?.group_id);
           valB = g2?.group_name || '';
+        } else if (sortConfig.field === 'prodi') {
+          valA = a.prodi || '';
+          valB = b.prodi || '';
         } else if (sortConfig.field === 'score') {
           valA = grades[a.id]?.[graderRoleKey]?.score || -1;
           valB = grades[b.id]?.[graderRoleKey]?.score || -1;
@@ -305,7 +308,7 @@ export const Penilaian = () => {
       <Card>
         <CardHeader>
           <CardTitle>
-            Daftar Mahasiswa {graderRoleKey === 'KehadiranSosialisasi' ? '(Penilaian Administrasi)' : `(Sebagai ${graderRoleKey})`}
+            Daftar Mahasiswa {graderRoleKey === 'Sosialisasi' ? '(Penilaian Administrasi)' : `(Sebagai ${graderRoleKey})`}
           </CardTitle>
           <CardDescription>Pilih mahasiswa untuk memberikan nilai.</CardDescription>
         </CardHeader>
@@ -323,6 +326,11 @@ export const Penilaian = () => {
                     <TableHead className="font-semibold text-slate-700 cursor-pointer group" onClick={() => handleSort('group')}>
                       Info Kelompok <SortIcon field="group" />
                     </TableHead>
+                    {graderRoleKey === 'Sosialisasi' && (
+                      <TableHead className="font-semibold text-slate-700 cursor-pointer group" onClick={() => handleSort('prodi')}>
+                        Prodi <SortIcon field="prodi" />
+                      </TableHead>
+                    )}
                     <TableHead className="text-center font-semibold text-slate-700 cursor-pointer group" onClick={() => handleSort('score')}>
                       Nilai Saya <SortIcon field="score" />
                     </TableHead>
@@ -344,19 +352,25 @@ export const Penilaian = () => {
                         </TableCell>
                         <TableCell>
                           <div className="text-sm font-medium text-slate-900">{group ? group.group_name : '-'}</div>
-                          <div className="text-xs text-slate-500">{student.prodi || '-'}</div>
+                          {graderRoleKey !== 'Sosialisasi' && (
+                            <div className="text-xs text-slate-500">{student.prodi || '-'}</div>
+                          )}
                         </TableCell>
+                        {graderRoleKey === 'Sosialisasi' && (
+                          <TableCell>
+                             <div className="text-sm text-slate-900">{student.prodi || '-'}</div>
+                          </TableCell>
+                        )}
                         <TableCell className="text-center">
                            {myScore !== undefined ? <span className="font-bold text-primary text-base">{Number(myScore).toFixed(1)}</span> : <span className="text-slate-400">-</span>}
                         </TableCell>
                         <TableCell className="text-right">
-                          {graderRoleKey === 'KehadiranSosialisasi' ? (
+                          {graderRoleKey === 'Sosialisasi' ? (
                             <div className="flex justify-end gap-2">
                                <Button 
                                  size="sm" 
                                  variant={myScore === 100 ? "default" : "outline"} 
                                  onClick={() => handleQuickSetSosialisasi(student, 100)}
-                                 disabled={myScore !== undefined && !isEditActive}
                                  className={myScore === 100 ? "bg-green-600 hover:bg-green-700" : ""}
                                >
                                  Hadir
@@ -365,7 +379,6 @@ export const Penilaian = () => {
                                  size="sm" 
                                  variant={myScore === 0 ? "destructive" : "outline"} 
                                  onClick={() => handleQuickSetSosialisasi(student, 0)}
-                                 disabled={myScore !== undefined && !isEditActive}
                                >
                                  Tidak Hadir
                                </Button>
