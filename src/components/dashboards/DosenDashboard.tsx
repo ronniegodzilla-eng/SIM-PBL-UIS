@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -12,6 +12,7 @@ import Markdown from 'react-markdown';
 import userGuideMd from '../../docs/USER_GUIDE_DOSEN.md?raw';
 import userGuidePLMd from '../../docs/USER_GUIDE_PEMBIMBING_LAPANGAN.md?raw';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 
 export const DosenDashboard = ({ role }: { role: string }) => {
   const { profile } = useAuth();
@@ -21,7 +22,23 @@ export const DosenDashboard = ({ role }: { role: string }) => {
   const [pendingLogbooks, setPendingLogbooks] = useState(0);
   const [pendingAttendances, setPendingAttendances] = useState(0);
   const [openGuide, setOpenGuide] = useState(false);
+  
+  const [allMembers, setAllMembers] = useState<any[]>([]);
+  const [allStudents, setAllStudents] = useState<any[]>([]);
+
   const navigate = useNavigate();
+
+  const handleSetLeader = async (groupId: string, studentId: string) => {
+    try {
+      await updateDoc(doc(db, 'pbl_groups', groupId), {
+        leader_id: studentId
+      });
+      toast.success('Ketua kelompok berhasil ditetapkan.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `pbl_groups/${groupId}`);
+      toast.error('Gagal menetapkan ketua kelompok');
+    }
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -71,6 +88,19 @@ export const DosenDashboard = ({ role }: { role: string }) => {
       unsubs.forEach(u => u());
     };
   }, [profile, role]);
+
+  useEffect(() => {
+    const unsubStudents = onSnapshot(query(collection(db, 'users'), where('role', '==', 'Mahasiswa')), (snapshot) => {
+      setAllStudents(snapshot.docs.map(doc => doc.data()));
+    });
+    const unsubMembers = onSnapshot(collection(db, 'group_members'), (snapshot) => {
+       setAllMembers(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
+    });
+    return () => {
+      unsubStudents();
+      unsubMembers();
+    }
+  }, []);
 
   useEffect(() => {
     if (plGroups.length === 0) return;
@@ -250,21 +280,55 @@ export const DosenDashboard = ({ role }: { role: string }) => {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {dplGroups.map(group => (
-                  <div key={group.id} className="border border-slate-100 bg-slate-50 rounded-lg p-4 flex items-center justify-between">
-                    <div>
-                      <h4 className="font-semibold text-sm mb-1">{group.group_name}</h4>
-                      <Badge variant="outline" className="text-xs">{group.status}</Badge>
+                {dplGroups.map(group => {
+                  const members = allMembers.filter(m => m.group_id === group.id && m.status === 'Approved');
+                  const memberDetails = members.map(m => {
+                    const student = allStudents.find(s => s.uid === m.student_id);
+                    return { ...m, ...student };
+                  });
+
+                  return (
+                  <div key={group.id} className="border border-slate-100 bg-slate-50 rounded-lg p-4 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-semibold text-sm mb-1">{group.group_name}</h4>
+                        <Badge variant="outline" className="text-xs">{group.status}</Badge>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => navigate('/penilaian')}
+                      >
+                        Beri Nilai
+                      </Button>
                     </div>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => navigate('/penilaian')}
-                    >
-                      Beri Nilai
-                    </Button>
+                    {memberDetails.length > 0 && (
+                      <div className="border-t pt-3">
+                        <div className="text-xs font-semibold text-slate-500 mb-2">Anggota Kelompok:</div>
+                        <ul className="text-sm space-y-2">
+                          {memberDetails.map((m, i) => (
+                            <li key={i} className="flex justify-between items-center bg-white border p-2 rounded-md">
+                              <div>
+                                <span className={group.leader_id === m.student_id ? "font-semibold" : ""}>{m.name || 'Unknown Student'}</span>
+                                {group.leader_id === m.student_id && <Badge className="ml-2 bg-indigo-100 text-indigo-700 text-[10px]" variant="secondary">Ketua</Badge>}
+                              </div>
+                              {group.leader_id !== m.student_id && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="text-xs h-7 px-2"
+                                  onClick={() => handleSetLeader(group.id, m.student_id)}
+                                >
+                                  Jadikan Ketua
+                                </Button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
-                ))}
+                )})}
               </div>
             )}
           </CardContent>
