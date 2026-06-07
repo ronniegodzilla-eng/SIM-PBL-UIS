@@ -27,6 +27,7 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isAuthenticated() && (
         request.auth.token.email == "ronniegodzilla@gmail.com" ||
+        request.auth.token.email == "admin@uis.ac.id" ||
         hasRole('Admin')
       );
     }
@@ -80,6 +81,7 @@ service cloud.firestore {
              (!('final_score' in data) || data.final_score is number) &&
              (!('letter_grade' in data) || data.letter_grade is string) &&
              (!('id_number' in data) || data.id_number is string) &&
+             (!('lastLogin' in data) || data.lastLogin is string) &&
              data.createdAt is string;
     }
 
@@ -176,7 +178,7 @@ service cloud.firestore {
              data.group_member_id is string &&
              data.student_id is string &&
              data.evaluator_id is string &&
-             data.category in ['Sosialisasi', 'Lapangan', 'PembimbingLapangan', 'PeerReview', 'DosenPembimbing', 'DosenPenguji'] &&
+             data.category in ['Sosialisasi', 'Lapangan', 'PeerReview', 'DosenPembimbing', 'DosenPenguji'] &&
              data.score is number && data.score >= 0 && data.score <= 100 &&
              (!('rubric_scores' in data) || data.rubric_scores is map) &&
              data.createdAt is string;
