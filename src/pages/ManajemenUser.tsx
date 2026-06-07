@@ -29,6 +29,7 @@ export const ManajemenUser = () => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [userToReset, setUserToReset] = useState<string | null>(null);
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
   
   const [isMigrateDialogOpen, setIsMigrateDialogOpen] = useState(false);
   const [userToMigrate, setUserToMigrate] = useState<UserProfile | null>(null);
@@ -61,12 +62,10 @@ export const ManajemenUser = () => {
       const userObj = allUsers.find(u => u.uid === userToReset);
       if (userObj && userObj.email) {
         const { sendPasswordResetEmail } = await import('firebase/auth');
-        // We import auth from firebase config. Wait, auth is not imported here.
-        // I will use getAuth()
         const { getAuth } = await import('firebase/auth');
         const auth = getAuth();
         await sendPasswordResetEmail(auth, userObj.email);
-        toast.success(`Berhasil mengirim link reset password ke email ${userObj.email}. (Peringatan: Sistem autentikasi aman Firebase tidak mengizinkan bypass password ke 'ubahsaya' secara sepihak untuk akun yang sudah mengubah sandi sebelumnya.)`);
+        toast.success(`Link reset password terkirim ke ${userObj.email}. Pastikan email aktif, jika tidak maka tidak akan pernah sampai. Periksa Inbox/Spam.`);
       } else {
         toast.error('Email pengguna tidak ditemukan.');
       }
@@ -78,13 +77,13 @@ export const ManajemenUser = () => {
   };
 
   const executeMigration = async () => {
-    if (!userToMigrate || !targetMigrationUid) return;
-    if (userToMigrate.uid === targetMigrationUid) {
-      toast.error('Akun target tidak boleh sama dengan akun lama.');
+    if (!userToMigrate) return;
+    if (!targetMigrationUid) {
+      toast.error('Gagal: Anda harus memilih "Akun BARU" di pilihan bawah untuk melanjutkan migrasi.');
       return;
     }
-
-    if (!window.confirm('PERINGATAN: Tindakan ini akan memindahkan SEMUA data dari akun lama ke akun baru. Lanjutkan?')) {
+    if (userToMigrate.uid === targetMigrationUid) {
+      toast.error('Akun target tidak boleh sama dengan akun lama.');
       return;
     }
 
@@ -151,15 +150,16 @@ export const ManajemenUser = () => {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus pengguna ini? Tindakan ini tidak dapat dibatalkan.')) {
-      try {
-        await deleteDoc(doc(db, 'users', userId));
-        toast.success('Pengguna berhasil dihapus');
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
-        toast.error('Gagal menghapus pengguna');
-      }
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'users', userToDelete));
+      toast.success('Pengguna berhasil dihapus');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${userToDelete}`);
+      toast.error('Gagal menghapus pengguna');
+    } finally {
+      setUserToDelete(null);
     }
   };
 
@@ -314,7 +314,7 @@ export const ManajemenUser = () => {
                               <Replace className="mr-2 h-4 w-4 text-amber-600" />
                               <span className="text-amber-600">Migrasi Data UID</span>
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDeleteUser(u.uid)} className="text-red-600">
+                            <DropdownMenuItem onClick={() => setUserToDelete(u.uid)} className="text-red-600">
                               <Trash className="mr-2 h-4 w-4" />
                               <span>Hapus Pengguna</span>
                             </DropdownMenuItem>
@@ -433,7 +433,7 @@ export const ManajemenUser = () => {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsMigrateDialogOpen(false)} disabled={isMigrating}>Batal</Button>
-            <Button onClick={executeMigration} disabled={isMigrating || !targetMigrationUid} className="bg-amber-600 hover:bg-amber-700 text-white">
+            <Button onClick={executeMigration} disabled={isMigrating} className="bg-amber-600 hover:bg-amber-700 text-white">
               {isMigrating ? 'Memproses...' : 'Jalankan Migrasi Data'}
             </Button>
           </DialogFooter>
@@ -462,6 +462,21 @@ export const ManajemenUser = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setUserToReset(null)}>Batal</Button>
             <Button onClick={confirmResetPassword} className="bg-amber-600 hover:bg-amber-700">Tetap Kirim Email Reset</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Konfirmasi Hapus Pengguna</DialogTitle>
+            <DialogDescription className="mt-2 text-sm text-slate-500">
+              Apakah Anda yakin ingin menghapus pengguna ini secara permanen?
+              Tindakan ini tidak dapat dibatalkan.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUserToDelete(null)}>Batal</Button>
+            <Button onClick={handleDeleteUser} className="bg-red-600 hover:bg-red-700">Hapus</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

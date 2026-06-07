@@ -74,13 +74,13 @@ export const Login = () => {
     try {
       setIsResetting(true);
       await sendPasswordResetEmail(auth, resetEmail);
-      toast.success('Email reset password telah dikirim. Silakan periksa inbox atau folder spam Anda.');
+      toast.success('Jika email tersebut terdaftar, tautan reset password akan dikirim ke Inbox atau folder Spam Anda.');
       setIsResetDialogOpen(false);
       setResetEmail('');
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/user-not-found') {
-        toast.error('Pengguna dengan email ini tidak ditemukan.');
+        toast.error('Pengguna dengan email ini tidak ditemukan (pastikan ejaan benar).');
       } else if (error.code === 'auth/invalid-email') {
         toast.error('Format email tidak valid.');
       } else {
