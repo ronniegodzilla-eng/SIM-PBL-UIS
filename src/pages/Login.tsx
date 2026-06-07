@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { loginWithGoogle, db, auth } from '../firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { toast } from 'sonner';
 
 export const Login = () => {
@@ -15,6 +16,9 @@ export const Login = () => {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +64,33 @@ export const Login = () => {
     }
   };
 
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      toast.error('Silakan masukkan email Anda.');
+      return;
+    }
+
+    try {
+      setIsResetting(true);
+      await sendPasswordResetEmail(auth, resetEmail);
+      toast.success('Email reset password telah dikirim. Silakan periksa inbox atau folder spam Anda.');
+      setIsResetDialogOpen(false);
+      setResetEmail('');
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === 'auth/user-not-found') {
+        toast.error('Pengguna dengan email ini tidak ditemukan.');
+      } else if (error.code === 'auth/invalid-email') {
+        toast.error('Format email tidak valid.');
+      } else {
+        toast.error('Gagal mengirim email reset password. Coba lagi nanti.');
+      }
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <Card className="w-full max-w-md">
@@ -83,7 +114,17 @@ export const Login = () => {
               />
             </div>
             <div className="space-y-2 text-left">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Button 
+                  type="button" 
+                  variant="link" 
+                  className="px-0 font-normal h-auto text-xs text-primary"
+                  onClick={() => setIsResetDialogOpen(true)}
+                >
+                  Lupa Password?
+                </Button>
+              </div>
               <Input 
                 id="password" 
                 type="password" 
@@ -113,6 +154,46 @@ export const Login = () => {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Masukkan alamat email yang Anda gunakan untuk mendaftar. Kami akan mengirimkan tautan untuk mengatur ulang password Anda.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleResetPassword}>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email</Label>
+                <Input 
+                  id="reset-email" 
+                  type="email" 
+                  placeholder="nama@email.com" 
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  required 
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setIsResetDialogOpen(false)}
+                disabled={isResetting}
+              >
+                Batal
+              </Button>
+              <Button type="submit" disabled={isResetting || !resetEmail}>
+                {isResetting ? 'Mengirim...' : 'Kirim Link Reset'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, writeBatch, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { UserProfile, useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -8,8 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 import { BulkImportUsers } from '../components/dashboards/BulkImportUsers';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
-import { MoreHorizontal, Key, Trash, UserCog, Edit2, Search, ArrowUp, ArrowDown } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '../components/ui/dropdown-menu';
+import { MoreHorizontal, Key, Trash, UserCog, Edit2, Search, ArrowUp, ArrowDown, Replace } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
@@ -29,6 +29,11 @@ export const ManajemenUser = () => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [userToReset, setUserToReset] = useState<string | null>(null);
+  
+  const [isMigrateDialogOpen, setIsMigrateDialogOpen] = useState(false);
+  const [userToMigrate, setUserToMigrate] = useState<UserProfile | null>(null);
+  const [targetMigrationUid, setTargetMigrationUid] = useState<string>('');
+  const [isMigrating, setIsMigrating] = useState(false);
 
   const handleSort = (field: keyof UserProfile) => {
     if (sortField === field) {
@@ -53,15 +58,96 @@ export const ManajemenUser = () => {
   const confirmResetPassword = async () => {
     if (!userToReset) return;
     try {
-      await updateDoc(doc(db, 'users', userToReset), {
-        mustChangePassword: true
-      });
-      toast.success('Berhasil mereset. (Mohon diingat: Di environment real, perubahan password DB Auth memerlukan admin SDK/Cloud Function. Sistem ini akan memaksa user ganti pass)');
+      const userObj = allUsers.find(u => u.uid === userToReset);
+      if (userObj && userObj.email) {
+        const { sendPasswordResetEmail } = await import('firebase/auth');
+        // We import auth from firebase config. Wait, auth is not imported here.
+        // I will use getAuth()
+        const { getAuth } = await import('firebase/auth');
+        const auth = getAuth();
+        await sendPasswordResetEmail(auth, userObj.email);
+        toast.success(`Berhasil mengirim link reset password ke email ${userObj.email}. (Peringatan: Sistem autentikasi aman Firebase tidak mengizinkan bypass password ke 'ubahsaya' secara sepihak untuk akun yang sudah mengubah sandi sebelumnya.)`);
+      } else {
+        toast.error('Email pengguna tidak ditemukan.');
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userToReset}`);
-      toast.error('Gagal mereset password');
+      toast.error('Gagal mengirim link reset password.');
     } finally {
       setUserToReset(null);
+    }
+  };
+
+  const executeMigration = async () => {
+    if (!userToMigrate || !targetMigrationUid) return;
+    if (userToMigrate.uid === targetMigrationUid) {
+      toast.error('Akun target tidak boleh sama dengan akun lama.');
+      return;
+    }
+
+    if (!window.confirm('PERINGATAN: Tindakan ini akan memindahkan SEMUA data dari akun lama ke akun baru. Lanjutkan?')) {
+      return;
+    }
+
+    setIsMigrating(true);
+    try {
+      const oldUid = userToMigrate.uid;
+      const newUid = targetMigrationUid;
+      const batch = writeBatch(db);
+
+      // 1. Group Members
+      const gmQuery = query(collection(db, 'group_members'), where('student_id', '==', oldUid));
+      const gmDocs = await getDocs(gmQuery);
+      gmDocs.forEach(d => batch.update(d.ref, { student_id: newUid }));
+
+      // 2. PBL Groups (if leader)
+      const groupQuery = query(collection(db, 'pbl_groups'), where('leader_id', '==', oldUid));
+      const groupDocs = await getDocs(groupQuery);
+      groupDocs.forEach(d => batch.update(d.ref, { leader_id: newUid }));
+
+      // 3. Logbooks
+      const logbookQuery = query(collection(db, 'logbooks'), where('student_id', '==', oldUid));
+      const logbookDocs = await getDocs(logbookQuery);
+      logbookDocs.forEach(d => batch.update(d.ref, { student_id: newUid }));
+
+      // 4. Attendances
+      const attQuery = query(collection(db, 'attendances'), where('student_id', '==', oldUid));
+      const attDocs = await getDocs(attQuery);
+      attDocs.forEach(d => batch.update(d.ref, { student_id: newUid }));
+
+      // 5. Grades (as student)
+      const gradesQuery = query(collection(db, 'grades'), where('student_id', '==', oldUid));
+      const gradesDocs = await getDocs(gradesQuery);
+      gradesDocs.forEach(d => {
+        batch.update(d.ref, { student_id: newUid });
+        // NOTE: we don't change grade ID as doc ID is static, but logic relies on student_id field
+      });
+
+      // 6. Grades (as evaluator - for peers or dosen)
+      const gradesEvalQuery = query(collection(db, 'grades'), where('evaluator_id', '==', oldUid));
+      const gradesEvalDocs = await getDocs(gradesEvalQuery);
+      gradesEvalDocs.forEach(d => batch.update(d.ref, { evaluator_id: newUid }));
+
+      // Update old user to Blocked so they can't be used
+      batch.update(doc(db, 'users', oldUid), { account_status: 'Blocked', email: `MIGRATED_${userToMigrate.email}` });
+
+      // Update new user to have the old user's role and approved status
+      batch.update(doc(db, 'users', newUid), { 
+        role: userToMigrate.role, 
+        account_status: userToMigrate.account_status,
+        name: userToMigrate.name
+      });
+
+      await batch.commit();
+
+      toast.success(`Berhasil memigrasikan data dari ${userToMigrate.name} ke akun baru.`);
+      setIsMigrateDialogOpen(false);
+      setUserToMigrate(null);
+      setTargetMigrationUid('');
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Gagal melakukan migrasi data: ' + err.message);
+    } finally {
+      setIsMigrating(false);
     }
   };
 
@@ -220,6 +306,14 @@ export const ManajemenUser = () => {
                               <Key className="mr-2 h-4 w-4" />
                               <span>Reset Password</span>
                             </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => {
+                              setUserToMigrate(u);
+                              setIsMigrateDialogOpen(true);
+                            }}>
+                              <Replace className="mr-2 h-4 w-4 text-amber-600" />
+                              <span className="text-amber-600">Migrasi Data UID</span>
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleDeleteUser(u.uid)} className="text-red-600">
                               <Trash className="mr-2 h-4 w-4" />
                               <span>Hapus Pengguna</span>
@@ -292,22 +386,86 @@ export const ManajemenUser = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isMigrateDialogOpen} onOpenChange={(open) => !open && !isMigrating && setIsMigrateDialogOpen(false)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Migrasi Data Akun (Pemindahan UID)</DialogTitle>
+            <DialogDescription className="mt-2 text-sm text-slate-500">
+              Gunakan fitur ini JIKA mahasiswa mendaftar ulang dengan email baru karena email lamanya tidak aktif. Anda dapat memindahkan semua Logbook, Nilai, dan Kelompok mereka dari akun lama ini ke akun mereka yang baru terdaftar.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4 space-y-4">
+            <div className="p-3 bg-slate-50 rounded-md border text-sm">
+              <p className="font-semibold mb-1">Cara Kerja:</p>
+              <ul className="list-decimal pl-4 space-y-1 text-slate-600">
+                <li>Minta Mahasiswa mendaftar ulang di aplikasi dengan email baru mereka yg aktif.</li>
+                <li>Setelah mereka mendaftar, pilih Akun LAMA mereka di daftar pengguna, lalu klik <strong>"Migrasi Data UID"</strong>.</li>
+                <li>Pilih Akun BARU mereka di bawah ini. Semua data akan ditransfer!</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Dari Akun LAMA (Data akan dipindahkan dari sini):</Label>
+              <div className="p-3 bg-red-50 text-red-900 border border-red-200 rounded-md">
+                <strong>{userToMigrate?.name}</strong> - {userToMigrate?.email}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Ke Akun BARU (Tujuan pemindahan data):</Label>
+              <Select value={targetMigrationUid} onValueChange={setTargetMigrationUid} disabled={isMigrating}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih Akun Baru Mahasiswa..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[250px]">
+                  {allUsers
+                    .filter(u => u.uid !== userToMigrate?.uid)
+                    .map(u => (
+                      <SelectItem key={u.uid} value={u.uid}>
+                        {u.name} ({u.email}) - {u.account_status}
+                      </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsMigrateDialogOpen(false)} disabled={isMigrating}>Batal</Button>
+            <Button onClick={executeMigration} disabled={isMigrating || !targetMigrationUid} className="bg-amber-600 hover:bg-amber-700 text-white">
+              {isMigrating ? 'Memproses...' : 'Jalankan Migrasi Data'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!userToReset} onOpenChange={(open) => !open && setUserToReset(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reset Password Pengguna</DialogTitle>
+            <DialogTitle>Kirim Link Reset Password</DialogTitle>
             <DialogDescription className="mt-2 text-sm text-slate-500">
-              Apakah Anda yakin ingin mereset password pengguna ini menjadi <strong>"ubahsaya"</strong>?
+              Sistem Keamanan Firebase Client tidak mengizinkan bypass/mengubah password milik pengguna lain secara langsung tanpa integrasi Admin SDK (Backend).
+              Pengguna akan menerima <strong>email berisi link resmi Firebase</strong> untuk mengatur password baru.
               <br /><br />
-              Pengguna akan diwajibkan untuk mengganti password tersebut pada saat login berikutnya.
+              <strong className="text-slate-800">Bagaimana Jika Email Mahasiswa Tidak Aktif?</strong>
+              <br />
+              Jika mahasiswa lupa password dan emailnya sudah mati, Anda TIDAK BISA meresetnya lewat email. Satu-satunya solusi:
+              <br />
+              <ol className="list-decimal pl-4 mt-1 text-slate-800">
+                <li>Arahkan Mahasiswa untuk <strong>Mendaftar Ulang (Regitrasi Baru)</strong> menggunakan email baru mereka yang aktif.</li>
+                <li>Setelah mereka terdaftar, kembali ke halaman Manajemen User ini dan klik tombol titik tiga di akun lama mereka.</li>
+                <li>Pilih menu <strong>Migrasi Data UID</strong> &rarr; dan pindahkan data akun lamanya ke akun baru mereka yang baru terdaftar.</li>
+              </ol>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setUserToReset(null)}>Batal</Button>
-            <Button onClick={confirmResetPassword} className="bg-amber-600 hover:bg-amber-700">Ya, Reset Password</Button>
+            <Button onClick={confirmResetPassword} className="bg-amber-600 hover:bg-amber-700">Tetap Kirim Email Reset</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 };
+
