@@ -18,7 +18,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
   const [isSubmittingLogbook, setIsSubmittingLogbook] = useState(false);
   const [newLogbook, setNewLogbook] = useState({ activity_date: '', description: '' });
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
-  const [newAttendance, setNewAttendance] = useState({ date: '', type: 'Lapangan', is_present: true });
+  const [newAttendance, setNewAttendance] = useState({ date: '', type: 'Lapangan', is_present: true, other_text: '' });
 
   useEffect(() => {
     if (!profile || !groupMember) return;
@@ -80,7 +80,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
       setIsSubmittingAttendance(true);
       const attendanceId = `att_${profile.uid}_${Date.now()}`;
       
-      await setDoc(doc(db, 'attendances', attendanceId), {
+      const attData: any = {
         group_member_id: groupMember.id,
         student_id: profile.uid,
         date: newAttendance.date,
@@ -88,10 +88,16 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
         is_present: newAttendance.is_present,
         status: 'Pending',
         createdAt: new Date().toISOString()
-      });
+      };
+
+      if (newAttendance.type === 'Lainnya' && newAttendance.other_text) {
+        attData.other_text = newAttendance.other_text;
+      }
+      
+      await setDoc(doc(db, 'attendances', attendanceId), attData);
       
       toast.success('Absensi berhasil dicatat.');
-      setNewAttendance({ date: '', type: 'Lapangan', is_present: true });
+      setNewAttendance({ date: '', type: 'Lapangan', is_present: true, other_text: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'attendances');
       toast.error('Gagal mencatat absensi.');
@@ -183,9 +189,22 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
                     <SelectContent>
                       <SelectItem value="Sosialisasi">Sosialisasi</SelectItem>
                       <SelectItem value="Lapangan">Lapangan</SelectItem>
+                      <SelectItem value="Pembukaan">Pembukaan</SelectItem>
+                      <SelectItem value="Penutupan">Penutupan</SelectItem>
+                      <SelectItem value="Pengabdian kepada Masyarakat">Pengabdian kepada Masyarakat</SelectItem>
+                      <SelectItem value="Musyawarah Masyarakat Desa (MMD)">Musyawarah Masyarakat Desa (MMD)</SelectItem>
+                      <SelectItem value="Pengambilan Data">Pengambilan Data</SelectItem>
+                      <SelectItem value="Penyebaran Kuesioner">Penyebaran Kuesioner</SelectItem>
+                      <SelectItem value="Lainnya">Lainnya (Sebutkan)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {newAttendance.type === 'Lainnya' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="other_text">Sebutkan Kegiatan Lainnya</Label>
+                    <Input id="other_text" type="text" value={newAttendance.other_text} onChange={e => setNewAttendance({...newAttendance, other_text: e.target.value})} required />
+                  </div>
+                )}
                 <DialogFooter>
                   <Button type="submit" disabled={isSubmittingAttendance}>
                     {isSubmittingAttendance ? 'Menyimpan...' : 'Simpan'}
@@ -212,7 +231,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
               {attendances.map((att) => (
                 <TableRow key={att.id}>
                   <TableCell>{new Date(att.date).toLocaleDateString('id-ID')}</TableCell>
-                  <TableCell>{att.type}</TableCell>
+                  <TableCell>{att.type === 'Lainnya' && att.other_text ? `Lainnya (${att.other_text})` : att.type}</TableCell>
                   <TableCell>
                     <Badge variant={att.is_present ? 'default' : 'destructive'}>
                       {att.is_present ? 'Hadir' : 'Tidak Hadir'}

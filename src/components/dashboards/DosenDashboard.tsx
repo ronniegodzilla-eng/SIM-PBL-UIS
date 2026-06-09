@@ -103,12 +103,29 @@ export const DosenDashboard = ({ role }: { role: string }) => {
   }, []);
 
   useEffect(() => {
-    if (plGroups.length === 0) return;
+    const allGroups = [...plGroups, ...dplGroups];
+    if (allGroups.length === 0) {
+      setPendingLogbooks(0);
+      setPendingAttendances(0);
+      return;
+    }
 
-    const groupIds = plGroups.map(g => g.id);
+    const groupIds = allGroups.map(g => g.id);
     const qMembers = query(collection(db, 'group_members'));
     
+    let currentUnsubLogs: (() => void) | null = null;
+    let currentUnsubAtts: (() => void) | null = null;
+
     const unsubMembers = onSnapshot(qMembers, (snapshot) => {
+      if (currentUnsubLogs) {
+        currentUnsubLogs();
+        currentUnsubLogs = null;
+      }
+      if (currentUnsubAtts) {
+        currentUnsubAtts();
+        currentUnsubAtts = null;
+      }
+
       const sIds: string[] = [];
       snapshot.forEach(doc => {
         const data = doc.data();
@@ -124,33 +141,30 @@ export const DosenDashboard = ({ role }: { role: string }) => {
       }
 
       const qLogbooks = query(collection(db, 'logbooks'), where('status', '==', 'Pending'));
-      const unsubLogs = onSnapshot(qLogbooks, (snapLogs) => {
+      currentUnsubLogs = onSnapshot(qLogbooks, (snapLogs) => {
         let count = 0;
         snapLogs.forEach((lDoc) => {
           if (sIds.includes(lDoc.data().student_id)) count++;
         });
         setPendingLogbooks(count);
-      });
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'logbooks'));
 
       const qAttendances = query(collection(db, 'attendances'), where('status', '==', 'Pending'));
-      const unsubAtts = onSnapshot(qAttendances, (snapAtts) => {
+      currentUnsubAtts = onSnapshot(qAttendances, (snapAtts) => {
         let count = 0;
         snapAtts.forEach((aDoc) => {
           if (sIds.includes(aDoc.data().student_id)) count++;
         });
         setPendingAttendances(count);
-      });
-
-      return () => {
-        unsubLogs();
-        unsubAtts();
-      };
-    });
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'attendances'));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'group_members'));
 
     return () => {
       unsubMembers();
+      if (currentUnsubLogs) currentUnsubLogs();
+      if (currentUnsubAtts) currentUnsubAtts();
     };
-  }, [plGroups]);
+  }, [plGroups, dplGroups]);
 
   const totalGroups = dplGroups.length + plGroups.length;
 
@@ -229,7 +243,7 @@ export const DosenDashboard = ({ role }: { role: string }) => {
           </CardContent>
         </Card>
 
-        {(plGroups.length > 0 || role === 'PembimbingLapangan') && (
+        {(plGroups.length > 0 || dplGroups.length > 0 || role === 'PembimbingLapangan') && (
           <>
             <Card 
               className="cursor-pointer hover:border-orange-200 hover:shadow-sm transition-all"

@@ -361,7 +361,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
                       </TableCell>
                       <TableCell>{new Date(att.date).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' })}</TableCell>
                       <TableCell>
-                        <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md text-sm">{att.type}</span>
+                        <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md text-sm">{att.type === 'Lainnya' && att.other_text ? `Lainnya (${att.other_text})` : att.type}</span>
                       </TableCell>
                       <TableCell>
                         <Badge className={att.is_present ? 'bg-blue-100 text-blue-700 hover:bg-blue-100' : 'bg-red-100 text-red-700 hover:bg-red-100'} variant="outline">
