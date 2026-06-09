@@ -20,7 +20,6 @@ service cloud.firestore {
 
     function hasRole(roleName) {
       return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
              getUserData().role == roleName;
     }
 
@@ -58,7 +57,6 @@ service cloud.firestore {
 
     function isActiveUser() {
       return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
              getUserData().account_status == 'Active';
     }
 
@@ -263,9 +261,11 @@ service cloud.firestore {
       // Public read for aggregate stats
       allow read: if true;
       allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isSuperAdmin());
-      allow update: if isAuthenticated() && isValidLogbook(request.resource.data) && (
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
-        isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()
+      allow update: if isAuthenticated() && (
+        (isMahasiswa() && isValidLogbook(request.resource.data) && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
+        ((isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()) && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && 
+         request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin() || (isMahasiswa() && resource.data.student_id == request.auth.uid);
     }
@@ -275,8 +275,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isAnyAdmin()
       );
-      allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()
+      allow update: if isAuthenticated() && (
+        (isMahasiswa() && isValidAttendance(request.resource.data) && request.resource.data.student_id == request.auth.uid) ||
+        ((isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()) && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && 
+         request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin();
     }
