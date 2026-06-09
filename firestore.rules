@@ -124,9 +124,10 @@ service cloud.firestore {
              data.group_member_id is string &&
              data.student_id is string &&
              data.date is string &&
-             data.type in ['Sosialisasi', 'Lapangan'] &&
+             data.type is string &&
+             (!('other_text' in data) || data.other_text is string) &&
              data.is_present is bool &&
-             (!('status' in data) || data.status in ['Pending', 'Approved']) &&
+             (!('status' in data) || data.status is string) &&
              data.createdAt is string;
     }
 
@@ -178,7 +179,7 @@ service cloud.firestore {
              data.group_member_id is string &&
              data.student_id is string &&
              data.evaluator_id is string &&
-             data.category in ['Sosialisasi', 'Lapangan', 'PeerReview', 'DosenPembimbing', 'DosenPenguji'] &&
+             data.category in ['Sosialisasi', 'PembimbingLapangan', 'PeerReview', 'DosenPembimbing', 'DosenPenguji'] &&
              data.score is number && data.score >= 0 && data.score <= 100 &&
              (!('rubric_scores' in data) || data.rubric_scores is map) &&
              data.createdAt is string;
@@ -275,7 +276,7 @@ service cloud.firestore {
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isAnyAdmin()
       );
       allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isPembimbingLapangan() || isAnyAdmin()
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()
       );
       allow delete: if isAnyAdmin();
     }
