@@ -11,19 +11,50 @@ export const PersetujuanAbsensiPage = () => {
   useEffect(() => {
     if (!profile) return;
     
-    let qGroups;
+    let unsubs: (() => void)[] = [];
+    
     if (profile.role === 'PembimbingLapangan') {
-      qGroups = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      const qGroups = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      unsubs.push(onSnapshot(qGroups, (snapshot) => {
+        const g: any[] = [];
+        snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
+        setGroups(g);
+      }));
+    } else if (profile.role === 'Dosen') {
+      const qDpl = query(collection(db, 'pbl_groups'), where('dsn_pembimbing_id', '==', profile.uid));
+      const qPl = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      
+      let dplGroups: any[] = [];
+      let plGroups: any[] = [];
+      
+      const updateGroups = () => {
+        const map = new Map();
+        dplGroups.forEach(g => map.set(g.id, g));
+        plGroups.forEach(g => map.set(g.id, g));
+        setGroups(Array.from(map.values()));
+      };
+
+      unsubs.push(onSnapshot(qDpl, (snapshot) => {
+        dplGroups = [];
+        snapshot.forEach(doc => dplGroups.push({ id: doc.id, ...doc.data() }));
+        updateGroups();
+      }));
+      
+      unsubs.push(onSnapshot(qPl, (snapshot) => {
+        plGroups = [];
+        snapshot.forEach(doc => plGroups.push({ id: doc.id, ...doc.data() }));
+        updateGroups();
+      }));
     } else {
-      qGroups = query(collection(db, 'pbl_groups')); // Fallback
+      const qGroups = query(collection(db, 'pbl_groups'));
+      unsubs.push(onSnapshot(qGroups, (snapshot) => {
+        const g: any[] = [];
+        snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
+        setGroups(g);
+      }));
     }
     
-    const unsub = onSnapshot(qGroups, (snapshot) => {
-      const g: any[] = [];
-      snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
-      setGroups(g);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'pbl_groups'));
-    return () => unsub();
+    return () => unsubs.forEach(fn => fn());
   }, [profile]);
 
   return (
