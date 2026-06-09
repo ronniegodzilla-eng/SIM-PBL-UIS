@@ -15,18 +15,21 @@ service cloud.firestore {
     }
 
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data 
+        : null;
     }
 
     function hasRole(roleName) {
       return isAuthenticated() && 
+             getUserData() != null && 
              getUserData().role == roleName;
     }
 
     function isSuperAdmin() {
       return isAuthenticated() && (
-        request.auth.token.email == "ronniegodzilla@gmail.com" ||
-        request.auth.token.email == "admin@uis.ac.id" ||
+        ('email' in request.auth.token && request.auth.token.email == "ronniegodzilla@gmail.com") ||
+        ('email' in request.auth.token && request.auth.token.email == "admin@uis.ac.id") ||
         hasRole('Admin')
       );
     }
@@ -260,26 +263,22 @@ service cloud.firestore {
     match /logbooks/{logbookId} {
       // Public read for aggregate stats
       allow read: if true;
-      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isSuperAdmin());
+      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin());
       allow update: if isAuthenticated() && (
-        (isMahasiswa() && isValidLogbook(request.resource.data) && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
-        ((isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()) && 
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && 
-         request.resource.data.status in ['Pending', 'Approved'])
+        isAnyAdmin() ||
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
+        ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin() || (isMahasiswa() && resource.data.student_id == request.auth.uid);
     }
 
     match /attendances/{attendanceId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isAnyAdmin()
-      );
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin());
       allow update: if isAuthenticated() && (
-        (isMahasiswa() && isValidAttendance(request.resource.data) && request.resource.data.student_id == request.auth.uid) ||
-        ((isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()) && 
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && 
-         request.resource.data.status in ['Pending', 'Approved'])
+        isAnyAdmin() ||
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
+        ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin();
     }
