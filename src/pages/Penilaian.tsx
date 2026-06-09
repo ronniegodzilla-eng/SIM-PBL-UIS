@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import { Search, ArrowUp, ArrowDown } from 'lucide-react';
 
@@ -41,18 +42,19 @@ export const Penilaian = () => {
     if (!profile) return;
 
     let roleName = profile.role;
-    if (roleName === 'PembimbingLapangan' || roleName === 'Dosen') {
-       // Just default Dosen to DosenPembimbing rubric if they aren't explicit, but actually they might grade on both? 
-       // For simplicity, map regular Dosen to DosenPembimbing here, or let them switch?
-       // Usually they are assigned specifically. We'll map Dosen generically to DosenPembimbing's rubric
-       setGraderRoleKey(roleName === 'Dosen' ? 'DosenPembimbing' : roleName);
+    if (roleName === 'PembimbingLapangan') {
+       setGraderRoleKey('PembimbingLapangan');
+    } else if (roleName === 'Dosen') {
+       // Default to DosenPembimbing. We'll add a UI toggle to change to PembimbingLapangan
+       if (!['DosenPembimbing', 'PembimbingLapangan', 'DosenPenguji'].includes(graderRoleKey)) {
+         setGraderRoleKey('DosenPembimbing');
+       }
     } else if (roleName === 'Admin' || roleName === 'AdminProdi') {
        setGraderRoleKey('Sosialisasi');
     } else {
        setGraderRoleKey('DosenPenguji');
     }
 
-    // It depends on graderRoleKey state now:
   }, [profile]);
 
   useEffect(() => {
@@ -294,14 +296,28 @@ export const Penilaian = () => {
           <h1 className="text-2xl font-bold tracking-tight">Penilaian PBL</h1>
           <p className="text-muted-foreground">Berikan nilai kepada mahasiswa secara perorangan sesuai rubrik.</p>
         </div>
-        <div className="relative w-full sm:w-80 lg:w-96 shadow-sm rounded-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-          <Input 
-            className="pl-10 h-11 border-slate-300 bg-white focus-visible:ring-primary text-base placeholder:text-slate-400" 
-            placeholder="Cari nama, prodi, kelompok..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {profile?.role === 'Dosen' && (
+            <Select value={graderRoleKey} onValueChange={setGraderRoleKey}>
+              <SelectTrigger className="w-full sm:w-[260px] bg-indigo-50 border-indigo-200 text-indigo-700 font-medium shadow-sm hover:bg-indigo-100 transition-colors">
+                <SelectValue placeholder="Pilih Peran Penilai" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DosenPembimbing">Sebagai Dosen Pembimbing</SelectItem>
+                <SelectItem value="PembimbingLapangan">Sebagai Pembimbing Lapangan</SelectItem>
+                <SelectItem value="DosenPenguji">Sebagai Dosen Penguji</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+          <div className="relative w-full sm:w-80 lg:w-96 shadow-sm rounded-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+            <Input 
+              className="pl-10 h-11 border-slate-300 bg-white focus-visible:ring-primary text-base placeholder:text-slate-400" 
+              placeholder="Cari nama, prodi, kelompok..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
