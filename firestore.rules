@@ -264,10 +264,10 @@ service cloud.firestore {
       // Public read for aggregate stats
       allow read: if true;
       allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin());
-      allow update: if isAuthenticated() && (
+      allow update: if isAuthenticated() && isValidLogbook(request.resource.data) && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
-        ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.status in ['Pending', 'Approved'])
+        ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin() || (isMahasiswa() && resource.data.student_id == request.auth.uid);
     }
@@ -275,10 +275,10 @@ service cloud.firestore {
     match /attendances/{attendanceId} {
       allow read: if true;
       allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin());
-      allow update: if isAuthenticated() && (
+      allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
-        ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.status in ['Pending', 'Approved'])
+        ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin();
     }
