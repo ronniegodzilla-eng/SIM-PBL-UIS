@@ -110,25 +110,25 @@ service cloud.firestore {
     }
 
     function isValidLogbook(data) {
-      return data.keys().hasAll(['group_member_id', 'student_id', 'activity_date', 'description', 'status', 'createdAt']) &&
-             data.group_member_id is string &&
+      return data.keys().hasAll(['student_id', 'activity_date', 'description', 'status']) &&
+             (!('group_member_id' in data) || data.group_member_id is string) &&
              data.student_id is string &&
              data.activity_date is string &&
              data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
              data.status in ['Pending', 'Approved'] &&
-             data.createdAt is string;
+             (!('createdAt' in data) || data.createdAt is string);
     }
 
     function isValidAttendance(data) {
-      return data.keys().hasAll(['group_member_id', 'student_id', 'date', 'type', 'is_present', 'createdAt']) &&
-             data.group_member_id is string &&
+      return data.keys().hasAll(['student_id', 'date', 'type', 'is_present']) &&
+             (!('group_member_id' in data) || data.group_member_id is string) &&
              data.student_id is string &&
              data.date is string &&
              data.type is string &&
              (!('other_text' in data) || data.other_text is string) &&
-             data.is_present is bool &&
+             (!('is_present' in data) || data.is_present is bool || data.is_present is string) &&
              (!('status' in data) || data.status is string) &&
-             data.createdAt is string;
+             (!('createdAt' in data) || data.createdAt is string);
     }
 
     function isValidExamSchedule(data) {
