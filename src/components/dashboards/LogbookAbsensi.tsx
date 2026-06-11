@@ -19,6 +19,22 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
   const [newLogbook, setNewLogbook] = useState({ activity_date: '', description: '' });
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
   const [newAttendance, setNewAttendance] = useState({ date: '', type: 'Lapangan', is_present: true, other_text: '' });
+  const [documentationFile, setDocumentationFile] = useState<File | null>(null);
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        let encoded = reader.result?.toString().replace(/^data:(.*,)?/, '');
+        if ((encoded!.length % 4) > 0) {
+          encoded += '='.repeat(4 - (encoded!.length % 4));
+        }
+        resolve(encoded || '');
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
 
   useEffect(() => {
     if (!profile || !groupMember) return;
@@ -76,10 +92,46 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
     e.preventDefault();
     if (!profile || !groupMember) return;
 
+    if (!documentationFile) {
+      toast.error('Foto dokumentasi wajib diunggah.');
+      return;
+    }
+
     try {
       setIsSubmittingAttendance(true);
       const attendanceId = `att_${profile.uid}_${Date.now()}`;
       
+      let documentationUrl = '';
+
+      if (documentationFile) {
+        const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
+        if (!scriptUrl) {
+          throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
+        }
+
+        const base64 = await fileToBase64(documentationFile);
+        const filename = `att_${profile.uid}_${Date.now()}_${documentationFile.name}`;
+
+        const response = await fetch(scriptUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            filename: filename,
+            mimeType: documentationFile.type,
+            base64: base64
+          }),
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          }
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          documentationUrl = data.url;
+        } else {
+          throw new Error('Gagal mengunggah dokumentasi: ' + (data.error || 'Unknown error'));
+        }
+      }
+
       const attData: any = {
         group_member_id: groupMember.id,
         student_id: profile.uid,
@@ -90,6 +142,10 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
         createdAt: new Date().toISOString()
       };
 
+      if (documentationUrl) {
+        attData.documentation_url = documentationUrl;
+      }
+
       if (newAttendance.type === 'Lainnya' && newAttendance.other_text) {
         attData.other_text = newAttendance.other_text;
       }
@@ -98,9 +154,10 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
       
       toast.success('Absensi berhasil dicatat.');
       setNewAttendance({ date: '', type: 'Lapangan', is_present: true, other_text: '' });
-    } catch (error) {
+      setDocumentationFile(null);
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.CREATE, 'attendances');
-      toast.error('Gagal mencatat absensi.');
+      toast.error(error.message || 'Gagal mencatat absensi.');
     } finally {
       setIsSubmittingAttendance(false);
     }
@@ -205,6 +262,23 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
                     <Input id="other_text" type="text" value={newAttendance.other_text} onChange={e => setNewAttendance({...newAttendance, other_text: e.target.value})} required />
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label htmlFor="documentation">Foto Dokumentasi (Wajib)</Label>
+                  <Input 
+                    id="documentation" 
+                    type="file" 
+                    accept="image/*"
+                    required
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        setDocumentationFile(e.target.files[0]);
+                      } else {
+                        setDocumentationFile(null);
+                      }
+                    }} 
+                  />
+                  <p className="text-xs text-muted-foreground">Upload foto kegiatan sebagai bukti absensi wajib disertakan.</p>
+                </div>
                 <DialogFooter>
                   <Button type="submit" disabled={isSubmittingAttendance}>
                     {isSubmittingAttendance ? 'Menyimpan...' : 'Simpan'}
@@ -224,6 +298,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
                 <TableHead>Tanggal</TableHead>
                 <TableHead>Jenis Kegiatan</TableHead>
                 <TableHead>Kehadiran</TableHead>
+                <TableHead>Dokumentasi</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -236,6 +311,15 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
                     <Badge variant={att.is_present ? 'default' : 'destructive'}>
                       {att.is_present ? 'Hadir' : 'Tidak Hadir'}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {att.documentation_url ? (
+                      <a href={att.documentation_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm truncate max-w-[150px] inline-block">
+                        Lihat Foto
+                      </a>
+                    ) : (
+                      <span className="text-slate-400 text-sm">-</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant={att.status === 'Approved' ? 'default' : 'secondary'}>{att.status || 'Pending'}</Badge>

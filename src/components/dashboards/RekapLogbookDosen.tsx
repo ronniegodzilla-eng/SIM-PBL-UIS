@@ -227,6 +227,7 @@ export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
                 <TableHead>Tanggal</TableHead>
                 <TableHead>Jenis Kegiatan</TableHead>
                 <TableHead>Kehadiran</TableHead>
+                <TableHead>Dokumentasi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -236,6 +237,15 @@ export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
                   <TableCell>{new Date(att.date).toLocaleDateString('id-ID')}</TableCell>
                   <TableCell>{att.type}</TableCell>
                   <TableCell>{att.is_present ? 'Hadir' : 'Tidak Hadir'}</TableCell>
+                  <TableCell>
+                    {att.documentation_url ? (
+                      <a href={att.documentation_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm truncate max-w-[120px] inline-block">
+                        Lihat Foto
+                      </a>
+                    ) : (
+                      <span className="text-slate-400 text-sm">-</span>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

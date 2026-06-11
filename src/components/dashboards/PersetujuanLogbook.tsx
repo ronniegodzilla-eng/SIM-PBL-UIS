@@ -337,6 +337,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
                     </TableHead>
                     <TableHead className="font-semibold text-slate-700">Jenis Kegiatan</TableHead>
                     <TableHead className="font-semibold text-slate-700">Kehadiran</TableHead>
+                    <TableHead className="font-semibold text-slate-700">Dokumentasi</TableHead>
                     <TableHead className="text-right font-semibold text-slate-700">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -367,6 +368,15 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
                         <Badge className={att.is_present ? 'bg-blue-100 text-blue-700 hover:bg-blue-100' : 'bg-red-100 text-red-700 hover:bg-red-100'} variant="outline">
                           {att.is_present ? '✨ Hadir' : '❌ Tidak Hadir'}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {att.documentation_url ? (
+                          <a href={att.documentation_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm truncate max-w-[120px] inline-block">
+                            Lihat Foto
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 text-sm">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button 
