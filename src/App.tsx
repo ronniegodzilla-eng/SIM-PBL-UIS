@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { AuthActionHandler } from './pages/AuthActionHandler';
 import { Dashboard } from './pages/Dashboard';
 import { ManajemenMahasiswa } from './pages/ManajemenMahasiswa';
 import { ManajemenStaff } from './pages/ManajemenStaff';
@@ -35,6 +36,8 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/__/auth/action" element={<AuthActionHandler />} />
+          <Route path="/auth/action" element={<AuthActionHandler />} />
           
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
