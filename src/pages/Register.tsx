@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth, ProgramStudi, Jalur } from '../contexts/AuthContext';
 import { loginWithGoogle, db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
@@ -12,7 +12,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 
 export const Register = () => {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (searchParams.get('mode') === 'resetPassword') {
+      navigate(`/auth/action?${searchParams.toString()}`);
+    }
+  }, [searchParams, navigate]);
+
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');

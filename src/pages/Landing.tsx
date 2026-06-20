@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { buttonVariants } from '../components/ui/button';
@@ -9,6 +9,15 @@ import { Calendar, Users, Briefcase, Activity, ChevronRight, FileText } from 'lu
 import { onAuthStateChanged } from 'firebase/auth';
 
 export const Landing = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (searchParams.get('mode') === 'resetPassword') {
+      navigate(`/auth/action?${searchParams.toString()}`);
+    }
+  }, [searchParams, navigate]);
+
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 

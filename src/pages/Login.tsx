@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { loginWithGoogle, db, auth } from '../firebase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
@@ -12,7 +12,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from 'sonner';
 
 export const Login = () => {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (searchParams.get('mode') === 'resetPassword') {
+      navigate(`/auth/action?${searchParams.toString()}`);
+    }
+  }, [searchParams, navigate]);
+
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
