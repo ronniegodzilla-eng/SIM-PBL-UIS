@@ -27,18 +27,35 @@ export const Register = () => {
   const [password, setPassword] = useState('');
   const [prodi, setProdi] = useState<ProgramStudi | ''>('');
   const [jalur, setJalur] = useState<Jalur | ''>('');
+  const [isProfileCompletion, setIsProfileCompletion] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user && user.email) {
+        setEmail(user.email);
+        setIsProfileCompletion(true);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleEmailRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !password || !prodi || !jalur) {
+    if (!name || (!email) || (!password && !isProfileCompletion) || !prodi || !jalur) {
       toast.error('Silakan isi semua kolom.');
       return;
     }
 
     try {
       setLoading(true);
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
+      let user = auth.currentUser;
+      
+      if (!isProfileCompletion || !user) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        user = userCredential.user;
+      }
+
+      if (!user) throw new Error("User object naturally missing.");
 
       const userDocRef = doc(db, 'users', user.uid);
       
@@ -61,9 +78,9 @@ export const Register = () => {
       await setDoc(userDocRef, userData);
 
       if (isAdmin) {
-        toast.success('Registrasi Admin berhasil!');
+        toast.success(isProfileCompletion ? 'Profil Admin berhasil dilengkapi!' : 'Registrasi Admin berhasil!');
       } else {
-        toast.success('Registrasi berhasil! Menunggu validasi Admin.');
+        toast.success(isProfileCompletion ? 'Profil berhasil dilengkapi! Menunggu validasi Admin.' : 'Registrasi berhasil! Menunggu validasi Admin.');
       }
       auth.signOut();
       navigate('/login');
@@ -74,7 +91,7 @@ export const Register = () => {
       } else if (error.code === 'auth/weak-password') {
         toast.error('Password terlalu lemah. Minimal 6 karakter.');
       } else {
-        toast.error('Gagal melakukan registrasi.');
+        toast.error('Gagal melakukan registrasi atau melengkapi profil.');
       }
     } finally {
       setLoading(false);
@@ -85,9 +102,11 @@ export const Register = () => {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-2xl font-bold">Registrasi Mahasiswa</CardTitle>
+          <CardTitle className="text-2xl font-bold">
+            {isProfileCompletion ? 'Lengkapi Profil Mahasiswa' : 'Registrasi Mahasiswa'}
+          </CardTitle>
           <CardDescription>
-            Daftar untuk mengikuti Pengalaman Belajar Lapangan
+            {isProfileCompletion ? 'Selesaikan profil agar akun dapat digunakan' : 'Daftar untuk mengikuti Pengalaman Belajar Lapangan'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -110,19 +129,22 @@ export const Register = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required 
+                disabled={isProfileCompletion}
               />
             </div>
-            <div className="space-y-2 text-left">
-              <Label htmlFor="password">Password</Label>
-              <Input 
-                id="password" 
-                type="password" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required 
-                minLength={6}
-              />
-            </div>
+            {!isProfileCompletion && (
+              <div className="space-y-2 text-left">
+                <Label htmlFor="password">Password</Label>
+                <Input 
+                  id="password" 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required 
+                  minLength={6}
+                />
+              </div>
+            )}
             <div className="space-y-2 text-left">
               <Label>Program Studi</Label>
               <Select value={prodi} onValueChange={(val: any) => setProdi(val)} required>

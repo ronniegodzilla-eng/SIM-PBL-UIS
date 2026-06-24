@@ -61,6 +61,7 @@ export const Login = () => {
         }
       } else {
         // No profile, redirect to register
+        toast.info('Mohon lengkapi profil Anda terlebih dahulu.');
         navigate('/register');
       }
     } catch (error: any) {
