@@ -129,6 +129,7 @@ service cloud.firestore {
              (!('other_text' in data) || data.other_text is string) &&
              (!('is_present' in data) || data.is_present is bool || data.is_present is string) &&
              (!('status' in data) || data.status is string) &&
+             (!('documentation_url' in data) || data.documentation_url is string) &&
              (!('createdAt' in data) || data.createdAt is string);
     }
 
@@ -164,13 +165,15 @@ service cloud.firestore {
       return data.keys().hasAll(['group_id', 'dosen_id', 'type', 'date', 'time', 'location', 'notes', 'attendances', 'createdAt', 'updatedAt']) &&
              data.group_id is string &&
              data.dosen_id is string &&
-             data.type in ['Pembukaan', 'Penutupan', 'Ujian', 'Pengabdian pada Masyarakat'] &&
+             data.type in ['Pembukaan', 'Penutupan', 'Ujian', 'Pengabdian pada Masyarakat', 'Insidental'] &&
              data.date is string &&
              data.time is string &&
              data.location is string &&
              data.notes is string &&
              data.attendances is map &&
              (!('dokumentasi_url' in data) || data.dokumentasi_url is string) &&
+             (!('dokumentasi_urls' in data) || data.dokumentasi_urls is list) &&
+             (!('title' in data) || data.title is string) &&
              data.createdAt is string &&
              data.updatedAt is string;
     }
@@ -242,7 +245,8 @@ service cloud.firestore {
       allow create: if isAnyAdmin() && isValidPBLGroup(request.resource.data);
       allow update: if isValidPBLGroup(request.resource.data) && (
         isAnyAdmin() ||
-        (isMahasiswa() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tempat_pbl']))
+        (isMahasiswa() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tempat_pbl'])) ||
+        ((isDosenPembimbing() || isPembimbingLapangan()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leader_id']))
       );
       allow delete: if isAnyAdmin();
     }
@@ -274,7 +278,7 @@ service cloud.firestore {
 
     match /attendances/{attendanceId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin());
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin()) && request.resource.data.keys().hasAll(['documentation_url']) && request.resource.data.documentation_url is string && request.resource.data.documentation_url != '';
       allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
