@@ -171,9 +171,9 @@ service cloud.firestore {
              data.location is string &&
              data.notes is string &&
              data.attendances is map &&
-             (!('dokumentasi_url' in data) || data.dokumentasi_url is string) &&
-             (!('dokumentasi_urls' in data) || data.dokumentasi_urls is list) &&
-             (!('title' in data) || data.title is string) &&
+             (!('dokumentasi_url' in data) || data.dokumentasi_url == null || data.dokumentasi_url is string) &&
+             (!('dokumentasi_urls' in data) || data.dokumentasi_urls == null || data.dokumentasi_urls is list) &&
+             (!('title' in data) || data.title == null || data.title is string) &&
              data.createdAt is string &&
              data.updatedAt is string;
     }
