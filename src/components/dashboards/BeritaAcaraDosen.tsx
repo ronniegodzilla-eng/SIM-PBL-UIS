@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { collection, query, getDocs, where, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, where, doc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -34,6 +34,10 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
   }, []);
   
   // Form State
+  const [activeTab, setActiveTab] = useState<'utama' | 'insidental'>('utama');
+  const [customTitle, setCustomTitle] = useState('');
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState('09:00');
   const [location, setLocation] = useState('');
@@ -56,18 +60,26 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
     return () => unsub();
   }, [profile]);
 
-  const handleOpenDialog = async (group: any, type: string) => {
+  const handleOpenDialog = async (group: any, type: string, existingDocId?: string) => {
     try {
       setLoading(true);
       setSelectedGroup(group);
       setSelectedType(type);
+      setCurrentDocId(existingDocId || null);
       
-      const existing = beritaData.find(b => b.group_id === group.id && b.type === type);
+      let existing = null;
+      if (existingDocId) {
+        existing = beritaData.find(b => b.id === existingDocId);
+      } else if (type !== 'Insidental') {
+        existing = beritaData.find(b => b.group_id === group.id && b.type === type);
+      }
+      
       if (existing) {
         setDate(existing.date);
         setTime(existing.time);
         setLocation(existing.location);
         setNotes(existing.notes);
+        setCustomTitle(existing.title || '');
         setDokumentasiUrls(existing.dokumentasi_urls || (existing.dokumentasi_url ? [existing.dokumentasi_url] : []));
         setDokumentasiFiles([]);
         setAttendances(existing.attendances || {});
@@ -76,12 +88,66 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
         setTime('09:00');
         setLocation('');
         setNotes('');
+        setCustomTitle('');
         setDokumentasiUrls([]);
         setDokumentasiFiles([]);
         setAttendances({});
       }
 
       // Fetch students for attendance
+      if (group && group.id) {
+        const groupMembersSnap = await getDocs(query(collection(db, 'group_members'), where('group_id', '==', group.id), where('status', '==', 'Approved')));
+        const studentIds = groupMembersSnap.docs.map(d => d.data().student_id);
+        
+        if (studentIds.length > 0) {
+           const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'Mahasiswa')));
+           const foundStudents = usersSnap.docs.filter(d => studentIds.includes(d.id)).map(d => ({id: d.id, ...d.data()}));
+           setStudents(foundStudents);
+           
+           if (!existing) {
+             const initialAtt: Record<string, boolean> = {};
+             foundStudents.forEach(s => initialAtt[s.id] = true); // Default Hadir
+             setAttendances(initialAtt);
+           }
+        } else {
+           setStudents([]);
+           setAttendances({});
+        }
+      } else {
+        setStudents([]);
+        setAttendances({});
+      }
+      
+      setIsDialogOpen(true);
+    } catch (e) {
+      toast.error('Gagal memuat data grup');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenNewInsidental = () => {
+    if (groups.length === 0) {
+      toast.error('Anda tidak memiliki kelompok bimbingan PBL untuk membuat kegiatan insidental.');
+      return;
+    }
+    setSelectedGroup(null);
+    setSelectedType('Insidental');
+    setCurrentDocId(null);
+    setDate(new Date().toISOString().split('T')[0]);
+    setTime('09:00');
+    setLocation('');
+    setNotes('');
+    setCustomTitle('');
+    setDokumentasiUrls([]);
+    setDokumentasiFiles([]);
+    setStudents([]);
+    setAttendances({});
+    setIsDialogOpen(true);
+  };
+
+  const fetchStudentsForAttendance = async (group: any) => {
+    try {
       const groupMembersSnap = await getDocs(query(collection(db, 'group_members'), where('group_id', '==', group.id), where('status', '==', 'Approved')));
       const studentIds = groupMembersSnap.docs.map(d => d.data().student_id);
       
@@ -90,19 +156,27 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
          const foundStudents = usersSnap.docs.filter(d => studentIds.includes(d.id)).map(d => ({id: d.id, ...d.data()}));
          setStudents(foundStudents);
          
-         if (!existing) {
-           const initialAtt: Record<string, boolean> = {};
-           foundStudents.forEach(s => initialAtt[s.id] = true); // Default Hadir
-           setAttendances(initialAtt);
-         }
+         const initialAtt: Record<string, boolean> = {};
+         foundStudents.forEach(s => initialAtt[s.id] = true); // Default Hadir
+         setAttendances(initialAtt);
       } else {
          setStudents([]);
          setAttendances({});
       }
-      
-      setIsDialogOpen(true);
     } catch (e) {
-      toast.error('Gagal memuat data grup');
+      toast.error('Gagal mengambil daftar mahasiswa');
+    }
+  };
+
+  const handleDelete = async (docId: string) => {
+    if (!window.confirm('Apakah Anda yakin ingin menghapus berita acara kegiatan insidental ini?')) return;
+    try {
+      setLoading(true);
+      await deleteDoc(doc(db, 'berita_acara', docId));
+      toast.success('Berita Acara kegiatan insidental berhasil dihapus');
+    } catch (e) {
+      toast.error('Gagal menghapus berita acara');
+      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -152,10 +226,20 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile || !selectedGroup) return;
+    if (!profile || !selectedGroup) {
+      toast.error('Silakan lengkapi pilihan kelompok terlebih dahulu.');
+      return;
+    }
     try {
       setLoading(true);
-      const docId = `${selectedGroup.id}_${selectedType}_${profile.uid}`;
+      let docId = currentDocId;
+      if (!docId) {
+        if (selectedType === 'Insidental') {
+          docId = `${selectedGroup.id}_Insidental_${Date.now()}_${profile.uid}`;
+        } else {
+          docId = `${selectedGroup.id}_${selectedType}_${profile.uid}`;
+        }
+      }
       
       let uploadedUrls: string[] = [...dokumentasiUrls];
       if (dokumentasiFiles.length > 0) {
@@ -178,6 +262,10 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
         updatedAt: new Date().toISOString()
       };
       
+      if (selectedType === 'Insidental') {
+        payload.title = customTitle;
+      }
+      
       if (uploadedUrls.length > 0) {
         payload.dokumentasi_urls = uploadedUrls;
       }
@@ -197,8 +285,13 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
     }
   };
 
-  const handleExportPdf = async (group: any, type: string) => {
-    const existing = beritaData.find(b => b.group_id === group.id && b.type === type);
+  const handleExportPdf = async (group: any, type: string, existingDocId?: string) => {
+    let existing = null;
+    if (existingDocId) {
+      existing = beritaData.find(b => b.id === existingDocId);
+    } else {
+      existing = beritaData.find(b => b.group_id === group.id && b.type === type);
+    }
     if (!existing) return;
 
     try {
@@ -206,7 +299,8 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
       
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
-      doc.text(`BERITA ACARA DAN SUPERVISI ${type.toUpperCase()} PBL`, 105, 20, { align: "center" });
+      const titleText = type === 'Insidental' ? (existing.title || 'Kegiatan Insidental') : `SUPERVISI ${type}`;
+      doc.text(`BERITA ACARA DAN ${titleText.toUpperCase()} PBL`, 105, 20, { align: "center" });
       
       doc.setFontSize(11);
       doc.setFont("helvetica", "normal");
@@ -220,7 +314,8 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
 
       const studyProgramRaw = group.prodi && group.prodi !== 'Semua' ? group.prodi : 'Ilmu Kesehatan Masyarakat / Keselamatan dan Kesehatan Kerja';
       
-      const splitHeader = doc.splitTextToSize(`Telah dilaksanakan kegiatan ${type} Pengalaman Belajar Lapangan (PBL) Program Studi ${studyProgramRaw}`, 180);
+      const displayType = type === 'Insidental' ? (existing.title || 'Kegiatan Insidental') : type;
+      const splitHeader = doc.splitTextToSize(`Telah dilaksanakan kegiatan ${displayType} Pengalaman Belajar Lapangan (PBL) Program Studi ${studyProgramRaw}`, 180);
       doc.text(splitHeader, 14, startY);
       
       const contentStartY = startY + (splitHeader.length * 5) + 5;
@@ -279,7 +374,7 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
       doc.text(`Dosen / Pembimbing`, 140, finalY + 6);
       doc.text(`(${profile?.name})`, 140, finalY + 25);
       
-      doc.save(`Berita_Acara_${type}_${group.group_name}.pdf`);
+      doc.save(`Berita_Acara_${displayType.replace(/\s+/g, '_')}_${group.group_name}.pdf`);
       toast.success('Berita Acara berhasil diunduh');
     } catch (e) {
       toast.error('Gagal mengunduh PDF');
@@ -288,91 +383,228 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
   };
 
   return (
-    <div className="space-y-4">
-      {groups.length === 0 ? (
-         <div className="text-center text-slate-500 text-sm">Tidak ada kelompok</div>
-      ) : (
-         <Table>
-            <TableHeader>
-               <TableRow>
+    <div className="space-y-6">
+      {/* Tab Switcher */}
+      <div className="flex border-b border-slate-200 mb-2">
+        <button
+          onClick={() => setActiveTab('utama')}
+          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all ${
+            activeTab === 'utama'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          Berita Acara Utama
+        </button>
+        <button
+          onClick={() => setActiveTab('insidental')}
+          className={`pb-3 px-6 text-sm font-semibold border-b-2 transition-all ${
+            activeTab === 'insidental'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          Kegiatan Insidental & Custom
+        </button>
+      </div>
+
+      {activeTab === 'utama' && (
+        <div className="space-y-4">
+          {groups.length === 0 ? (
+             <div className="text-center text-slate-500 text-sm py-8">Tidak ada kelompok bimbingan.</div>
+          ) : (
+             <Table>
+                <TableHeader>
+                   <TableRow>
+                      <TableHead>Nama Kelompok</TableHead>
+                      <TableHead>Pembukaan</TableHead>
+                      <TableHead>Penutupan</TableHead>
+                      <TableHead>Ujian</TableHead>
+                      <TableHead>Pengabdian Masyarakat</TableHead>
+                   </TableRow>
+                </TableHeader>
+                <TableBody>
+                   {groups.map(g => {
+                     const hasPembukaan = beritaData.some(b => b.group_id === g.id && b.type === 'Pembukaan');
+                     const hasPenutupan = beritaData.some(b => b.group_id === g.id && b.type === 'Penutupan');
+                     const hasUjian = beritaData.some(b => b.group_id === g.id && b.type === 'Ujian');
+                     const hasPengabdian = beritaData.some(b => b.group_id === g.id && b.type === 'Pengabdian pada Masyarakat');
+                     return (
+                        <TableRow key={g.id}>
+                           <TableCell className="font-semibold">{g.group_name}</TableCell>
+                           <TableCell>
+                              <div className="flex gap-2">
+                                 <Button variant={hasPembukaan ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Pembukaan')}>
+                                    {hasPembukaan ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
+                                 </Button>
+                                 {hasPembukaan && (
+                                    <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Pembukaan')} title="Download PDF">
+                                       <Download className="h-4 w-4" />
+                                    </Button>
+                                 )}
+                              </div>
+                           </TableCell>
+                           <TableCell>
+                              <div className="flex gap-2">
+                                 <Button variant={hasPenutupan ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Penutupan')}>
+                                    {hasPenutupan ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
+                                 </Button>
+                                 {hasPenutupan && (
+                                    <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Penutupan')} title="Download PDF">
+                                       <Download className="h-4 w-4" />
+                                    </Button>
+                                 )}
+                              </div>
+                           </TableCell>
+                           <TableCell>
+                              <div className="flex gap-2">
+                                 <Button variant={hasUjian ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Ujian')}>
+                                    {hasUjian ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
+                                 </Button>
+                                 {hasUjian && (
+                                    <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Ujian')} title="Download PDF">
+                                       <Download className="h-4 w-4" />
+                                    </Button>
+                                 )}
+                              </div>
+                           </TableCell>
+                           <TableCell>
+                              <div className="flex gap-2">
+                                 <Button variant={hasPengabdian ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Pengabdian pada Masyarakat')}>
+                                    {hasPengabdian ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
+                                 </Button>
+                                 {hasPengabdian && (
+                                    <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Pengabdian pada Masyarakat')} title="Download PDF">
+                                       <Download className="h-4 w-4" />
+                                    </Button>
+                                 )}
+                              </div>
+                           </TableCell>
+                        </TableRow>
+                     )
+                   })}
+                </TableBody>
+             </Table>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'insidental' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center bg-slate-50 p-4 rounded-lg border">
+            <div>
+              <h3 className="font-semibold text-slate-900">Kegiatan Insidental / Custom Lapangan</h3>
+              <p className="text-xs text-slate-500">Buat berita acara dan daftar hadir untuk kegiatan insidental bersama mahasiswa di lapangan.</p>
+            </div>
+            <Button onClick={handleOpenNewInsidental} size="sm" className="flex items-center gap-1.5 font-medium">
+              <span className="text-base font-bold">+</span> Tambah Kegiatan Insidental
+            </Button>
+          </div>
+
+          {beritaData.filter(b => b.type === 'Insidental').length === 0 ? (
+            <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-lg text-slate-500 text-sm">
+              Belum ada berita acara kegiatan insidental. Silakan klik "Tambah Kegiatan Insidental".
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
                   <TableHead>Nama Kelompok</TableHead>
-                  <TableHead>Pembukaan</TableHead>
-                  <TableHead>Penutupan</TableHead>
-                  <TableHead>Ujian</TableHead>
-                  <TableHead>Pengabdian Masyarakat</TableHead>
-               </TableRow>
-            </TableHeader>
-            <TableBody>
-               {groups.map(g => {
-                 const hasPembukaan = beritaData.some(b => b.group_id === g.id && b.type === 'Pembukaan');
-                 const hasPenutupan = beritaData.some(b => b.group_id === g.id && b.type === 'Penutupan');
-                 const hasUjian = beritaData.some(b => b.group_id === g.id && b.type === 'Ujian');
-                 const hasPengabdian = beritaData.some(b => b.group_id === g.id && b.type === 'Pengabdian pada Masyarakat');
-                 return (
-                    <TableRow key={g.id}>
-                       <TableCell className="font-semibold">{g.group_name}</TableCell>
-                       <TableCell>
-                          <div className="flex gap-2">
-                             <Button variant={hasPembukaan ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Pembukaan')}>
-                                {hasPembukaan ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
-                             </Button>
-                             {hasPembukaan && (
-                                <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Pembukaan')} title="Download PDF">
-                                   <Download className="h-4 w-4" />
-                                </Button>
-                             )}
-                          </div>
-                       </TableCell>
-                       <TableCell>
-                          <div className="flex gap-2">
-                             <Button variant={hasPenutupan ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Penutupan')}>
-                                {hasPenutupan ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
-                             </Button>
-                             {hasPenutupan && (
-                                <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Penutupan')} title="Download PDF">
-                                   <Download className="h-4 w-4" />
-                                </Button>
-                             )}
-                          </div>
-                       </TableCell>
-                       <TableCell>
-                          <div className="flex gap-2">
-                             <Button variant={hasUjian ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Ujian')}>
-                                {hasUjian ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
-                             </Button>
-                             {hasUjian && (
-                                <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Ujian')} title="Download PDF">
-                                   <Download className="h-4 w-4" />
-                                </Button>
-                             )}
-                          </div>
-                       </TableCell>
-                       <TableCell>
-                          <div className="flex gap-2">
-                             <Button variant={hasPengabdian ? "default" : "outline"} size="sm" onClick={() => handleOpenDialog(g, 'Pengabdian pada Masyarakat')}>
-                                {hasPengabdian ? 'Ubah Berita Acara' : 'Isi Berita Acara'}
-                             </Button>
-                             {hasPengabdian && (
-                                <Button variant="outline" size="icon" onClick={() => handleExportPdf(g, 'Pengabdian pada Masyarakat')} title="Download PDF">
-                                   <Download className="h-4 w-4" />
-                                </Button>
-                             )}
-                          </div>
-                       </TableCell>
+                  <TableHead>Nama Kegiatan</TableHead>
+                  <TableHead>Tanggal & Waktu</TableHead>
+                  <TableHead>Tempat</TableHead>
+                  <TableHead className="text-right">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {beritaData.filter(b => b.type === 'Insidental').map(b => {
+                  const grp = groups.find(g => g.id === b.group_id);
+                  const grpName = grp ? grp.group_name : 'Kelompok Terhapus';
+                  return (
+                    <TableRow key={b.id}>
+                      <TableCell className="font-semibold">{grpName}</TableCell>
+                      <TableCell className="font-medium">{b.title || 'Kegiatan Insidental'}</TableCell>
+                      <TableCell>
+                        {new Date(b.date).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })} - {b.time}
+                      </TableCell>
+                      <TableCell>{b.location}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handleOpenDialog(grp || {id: b.group_id, group_name: grpName}, 'Insidental', b.id)}>
+                            Ubah
+                          </Button>
+                          <Button variant="outline" size="icon" onClick={() => handleExportPdf(grp || {id: b.group_id, group_name: grpName}, 'Insidental', b.id)} title="Download PDF">
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button variant="destructive" size="sm" onClick={() => handleDelete(b.id)}>
+                            Hapus
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
-                 )
-              })}
-            </TableBody>
-         </Table>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Berita Acara {selectedType}</DialogTitle>
-            <DialogDescription>Kelompok: {selectedGroup?.group_name}</DialogDescription>
+            <DialogTitle>Berita Acara {selectedType === 'Insidental' ? (customTitle || 'Kegiatan Insidental') : selectedType}</DialogTitle>
+            <DialogDescription>
+              {selectedGroup ? `Kelompok: ${selectedGroup.group_name}` : 'Selesaikan form berita acara di bawah ini.'}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSave} className="space-y-6">
+            
+            {selectedType === 'Insidental' && !currentDocId && (
+              <div className="space-y-2">
+                <Label>Pilih Kelompok PBL <span className="text-red-500">*</span></Label>
+                <Select 
+                  value={selectedGroup?.id || ''} 
+                  onValueChange={(groupId) => {
+                    const g = groups.find(group => group.id === groupId);
+                    if (g) {
+                      setSelectedGroup(g);
+                      fetchStudentsForAttendance(g);
+                    }
+                  }}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Kelompok" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map(g => (
+                      <SelectItem key={g.id} value={g.id}>{g.group_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {selectedType === 'Insidental' && currentDocId && (
+              <div className="space-y-2">
+                <Label>Kelompok PBL</Label>
+                <Input value={selectedGroup?.group_name || ''} disabled />
+              </div>
+            )}
+
+            {selectedType === 'Insidental' && (
+              <div className="space-y-2">
+                <Label>Nama / Judul Kegiatan Insidental <span className="text-red-500">*</span></Label>
+                <Input 
+                  value={customTitle} 
+                  onChange={e => setCustomTitle(e.target.value)} 
+                  required 
+                  placeholder="Contoh: Supervisi Lapangan Tambahan / Diskusi Evaluasi" 
+                />
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Tanggal Kegiatan</Label>
@@ -394,9 +626,9 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
                <Textarea value={notes} onChange={e => setNotes(e.target.value)} required rows={4} placeholder="Tuliskan catatan penting selama kegiatan..." />
             </div>
 
-            {(selectedType === 'Pembukaan' || selectedType === 'Penutupan' || selectedType === 'Pengabdian pada Masyarakat') && (
+            {(selectedType === 'Pembukaan' || selectedType === 'Penutupan' || selectedType === 'Pengabdian pada Masyarakat' || selectedType === 'Insidental') && (
               <div className="space-y-2">
-                <Label>Dokumentasi Kegiatan (Foto) <span className="text-red-500">*wajib</span></Label>
+                <Label>Dokumentasi Kegiatan (Foto) {selectedType !== 'Insidental' && <span className="text-red-500">*wajib</span>}</Label>
                 <div className="text-xs text-muted-foreground mb-1">Unggah foto dokumentasi kegiatan (Bisa pilih lebih dari satu file).</div>
                 <Input 
                   type="file" 
@@ -407,7 +639,7 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
                       setDokumentasiFiles(Array.from(e.target.files));
                     }
                   }} 
-                  required={dokumentasiUrls.length === 0 && dokumentasiFiles.length === 0} 
+                  required={selectedType !== 'Insidental' && dokumentasiUrls.length === 0 && dokumentasiFiles.length === 0} 
                 />
                 
                 {dokumentasiUrls.length > 0 && (
@@ -435,7 +667,9 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
 
             <div className="space-y-2">
                <Label>Absensi Kehadiran Mahasiswa</Label>
-               {students.length === 0 ? (
+               {!selectedGroup ? (
+                 <div className="text-sm text-slate-500 border p-4 rounded-md">Silakan pilih kelompok terlebih dahulu untuk melihat daftar mahasiswa</div>
+               ) : students.length === 0 ? (
                  <div className="text-sm text-slate-500 border p-4 rounded-md">Belum ada mahasiswa di kelompok ini</div>
                ) : (
                  <div className="border rounded-md divide-y">
