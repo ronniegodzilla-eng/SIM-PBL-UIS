@@ -98,8 +98,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Track user active events
     const activityEvents = ['mousemove', 'mousedown', 'click', 'scroll', 'keypress', 'touchstart'];
 
-    // Initial check and start timer
-    checkInactivity();
+    // Login/mount dihitung sebagai aktivitas: tulis stempel SEKARANG sebelum
+    // pengecekan apa pun. Tanpa ini, stempel basi yang tertinggal dari sesi
+    // sebelumnya (tab ditutup tanpa logout) membuat checkInactivity langsung
+    // me-logout user yang baru saja berhasil login — user mengira passwordnya
+    // salah. Pengecekan idle cukup lewat interval, timer, dan event focus.
+    localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     resetInactivityTimeout();
 
     const handleActivity = () => {
