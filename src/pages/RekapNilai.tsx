@@ -68,9 +68,14 @@ export const RekapNilai = () => {
        const gradesMap: any = {};
        snapshot.forEach(doc => {
          const data = doc.data();
+
+         // Defense-in-depth: never count a grade a student gave to themselves.
+         // Server rules now block this, but legacy data may still contain it.
+         if (data.evaluator_id && data.student_id && data.evaluator_id === data.student_id) return;
+
          if (!gradesMap[data.student_id]) gradesMap[data.student_id] = {};
-         
-         // If it's peer review, we might have multiple peer grades. 
+
+         // If it's peer review, we might have multiple peer grades.
          // For simplicity, we just average them.
          if (data.category === 'PeerReview') {
             if (!gradesMap[data.student_id]['PeerReview']) gradesMap[data.student_id]['PeerReview'] = [];
