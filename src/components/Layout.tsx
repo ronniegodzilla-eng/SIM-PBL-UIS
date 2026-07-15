@@ -21,6 +21,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
+import { uploadToGoogleDrive } from '../lib/uploadFile';
 
 export const Layout = () => {
   const { user, profile, loading, isImpersonating, stopImpersonating, originalProfile } = useAuth();
@@ -112,46 +113,6 @@ export const Layout = () => {
     } finally {
       setUploading(false);
     }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const uploadToGoogleDrive = async (file: File, prefix: string) => {
-    const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-    if (!scriptUrl) {
-      throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
-    }
-
-    const base64 = await fileToBase64(file);
-    const filename = `${prefix}_${Date.now()}_${file.name}`;
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        filename: filename,
-        mimeType: file.type,
-        base64: base64
-      }),
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      }
-    });
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal mengunggah ke Google Drive');
-    }
-    return data.url;
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

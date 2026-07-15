@@ -8,6 +8,7 @@ import { db, handleFirestoreError, OperationType, secondaryAuth } from '../../fi
 import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { UserRole } from '../../contexts/AuthContext';
 import { Upload } from 'lucide-react';
+import { generateTempPassword } from '../../lib/utils';
 
 export const BulkImportUsers = () => {
   const [isImporting, setIsImporting] = useState(false);
@@ -29,6 +30,9 @@ export const BulkImportUsers = () => {
 
         let successCount = 0;
         let errorCount = 0;
+        // Kredensial per akun (password sementara acak, bukan seragam) untuk
+        // diunduh admin dan didistribusikan secara aman.
+        const createdCredentials: { name: string; email: string; password: string }[] = [];
 
         for (const row of data as any[]) {
           try {
@@ -46,7 +50,8 @@ export const BulkImportUsers = () => {
             }
 
             // Create user in secondary auth app
-            const userCredential = await createUserWithEmailAndPassword(secondaryAuth, row.email, 'ubahsaya');
+            const tempPassword = generateTempPassword();
+            const userCredential = await createUserWithEmailAndPassword(secondaryAuth, row.email, tempPassword);
             const newUserId = userCredential.user.uid;
             
             const userData: any = {
@@ -71,6 +76,7 @@ export const BulkImportUsers = () => {
             }
 
             await setDoc(doc(db, 'users', newUserId), userData);
+            createdCredentials.push({ name: row.name, email: row.email, password: tempPassword });
             successCount++;
           } catch (err) {
             console.error("Error importing row", row, err);
@@ -81,7 +87,20 @@ export const BulkImportUsers = () => {
         // Sign out from secondary auth
         await signOut(secondaryAuth);
 
-        toast.success(`Import selesai: ${successCount} berhasil, ${errorCount} gagal. Password default: ubahsaya`);
+        // Unduh daftar kredensial — satu-satunya kesempatan melihat password
+        // sementara ini; tidak disimpan di mana pun.
+        if (createdCredentials.length > 0) {
+          const credWs = XLSX.utils.json_to_sheet(createdCredentials.map(c => ({
+            'Nama': c.name,
+            'Email': c.email,
+            'Password Sementara': c.password
+          })));
+          const credWb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(credWb, credWs, 'Kredensial');
+          XLSX.writeFile(credWb, `Kredensial_Import_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
+
+        toast.success(`Import selesai: ${successCount} berhasil, ${errorCount} gagal. File kredensial (password sementara per akun) otomatis terunduh — simpan dan bagikan secara aman, lalu hapus.`, { duration: 60000 });
       } catch (error) {
         console.error("Error parsing Excel", error);
         toast.error('Gagal membaca file Excel. Pastikan formatnya benar.');

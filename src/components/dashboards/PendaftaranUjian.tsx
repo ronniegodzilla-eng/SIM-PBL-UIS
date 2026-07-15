@@ -7,6 +7,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { Badge } from '../ui/badge';
+import { uploadToGoogleDrive } from '../../lib/uploadFile';
 
 export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
   const { profile } = useAuth();
@@ -69,46 +70,6 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
     };
   }, [profile, groupMember]);
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const uploadToGoogleDrive = async (file: File, prefix: string) => {
-    const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-    if (!scriptUrl) {
-      throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
-    }
-
-    const base64 = await fileToBase64(file);
-    const filename = `${groupMember.group_id}_${prefix}_${Date.now()}_${file.name}`;
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        filename: filename,
-        mimeType: file.type,
-        base64: base64
-      }),
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      }
-    });
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal mengunggah ke Google Drive');
-    }
-    return data.url;
-  };
-
   const handleUploadFiles = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!persetujuanFile || !groupMember || groupMember.group_id === 'pending' || !report) return;
@@ -122,12 +83,12 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
 
     try {
       setLoading(true);
-      const persetujuanUrl = await uploadToGoogleDrive(persetujuanFile, 'persetujuan');
+      const persetujuanUrl = await uploadToGoogleDrive(persetujuanFile, `${groupMember.group_id}_persetujuan`);
 
       const customUrls: { [key: string]: string } = {};
       for (const req of settings.exam) {
          if (examFiles[req]) {
-           const url = await uploadToGoogleDrive(examFiles[req]!, `req_exam_${req.replace(/[^a-zA-Z0-9]/g, '')}`);
+           const url = await uploadToGoogleDrive(examFiles[req]!, `${groupMember.group_id}_req_exam_${req.replace(/[^a-zA-Z0-9]/g, '')}`);
            customUrls[req] = url;
          }
       }
@@ -186,7 +147,7 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       const customRevisiUrls: { [key: string]: string } = {};
       for (const req of settings.revisi) {
          if (revisiFiles[req]) {
-           const url = await uploadToGoogleDrive(revisiFiles[req]!, `req_revisi_${req.replace(/[^a-zA-Z0-9]/g, '')}`);
+           const url = await uploadToGoogleDrive(revisiFiles[req]!, `${groupMember.group_id}_req_revisi_${req.replace(/[^a-zA-Z0-9]/g, '')}`);
            customRevisiUrls[req] = url;
          }
       }

@@ -65,7 +65,7 @@ Untuk mengawasi kegiatan secara terpusat, admin diberikan akses untuk melihat ha
 ## FAQ (Frequently Asked Questions) - Admin
 
 **Q: Mahasiswa/Dosen lupa passwordnya, bagaimana cara mengatasinya?**
-A: Anda dapat mereset kata sandi mereka melalui menu [Manajemen User](/manajemen-user). Cari nama atau email pengguna yang bersangkutan, kemudian pada kolom aksi (actions), klik tombol 'Reset Password'. Sistem akan menetapkan passowrd default (contoh: `pbl123456`) yang harus mereka ganti setelah berhasil login.
+A: Anda dapat mereset kata sandi mereka melalui menu [Manajemen User](/manajemen-user). Cari nama atau email pengguna yang bersangkutan, kemudian pada kolom aksi (actions), klik tombol 'Reset Password'. Sistem akan mengirimkan email berisi link resmi Firebase ke alamat email pengguna untuk mengatur password baru (pastikan email pengguna masih aktif).
 
 **Q: Bagaimana cara mendaftarkan secara massal mahasiswa (import data)?**
 A: Saat ini, penambahan pengguna/mahasiswa harus dilakukan melalui sistem registrasi independen oleh mahasiswa atau diinput manual oleh Admin.
