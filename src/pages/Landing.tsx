@@ -19,6 +19,7 @@ export const Landing = () => {
   }, [searchParams, navigate]);
 
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Data
@@ -40,11 +41,16 @@ export const Landing = () => {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setCurrentUser(u);
+      setAuthReady(true);
     });
     return () => unsub();
   }, []);
 
   useEffect(() => {
+    // Tunggu status login diketahui dulu, supaya koleksi yang aksesnya
+    // butuh login (logbooks/attendances) tidak dibaca sebagai anonim.
+    if (!authReady) return;
+
     const fetchData = async () => {
       let mCount = 0;
       let dCount = 0;
@@ -100,25 +106,32 @@ export const Landing = () => {
         console.warn("Failed fetching exams", e);
       }
 
-      try {
-        // Fetch Logbooks
-        const logbooksSnap = await getDocs(collection(db, 'logbooks'));
-        const logbooksData: any[] = [];
-        logbooksSnap.forEach(doc => logbooksData.push({ id: doc.id, ...doc.data() }));
-        setLogbooks(logbooksData);
-        lCount = logbooksData.length;
-      } catch (e) {
-        console.warn("Failed fetching logbooks", e);
-      }
+      // Logbook & absensi hanya boleh dibaca pengguna login (aturan Firestore).
+      // Untuk pengunjung anonim, lewati saja — statistiknya ditampilkan "—".
+      if (currentUser) {
+        try {
+          // Fetch Logbooks
+          const logbooksSnap = await getDocs(collection(db, 'logbooks'));
+          const logbooksData: any[] = [];
+          logbooksSnap.forEach(doc => logbooksData.push({ id: doc.id, ...doc.data() }));
+          setLogbooks(logbooksData);
+          lCount = logbooksData.length;
+        } catch (e) {
+          console.warn("Failed fetching logbooks", e);
+        }
 
-      try {
-        // Fetch Attendances
-        const attSnap = await getDocs(collection(db, 'attendances'));
-        const attData: any[] = [];
-        attSnap.forEach(doc => attData.push({ id: doc.id, ...doc.data() }));
-        setAttendances(attData);
-      } catch (e) {
-        console.warn("Failed fetching attendances", e);
+        try {
+          // Fetch Attendances
+          const attSnap = await getDocs(collection(db, 'attendances'));
+          const attData: any[] = [];
+          attSnap.forEach(doc => attData.push({ id: doc.id, ...doc.data() }));
+          setAttendances(attData);
+        } catch (e) {
+          console.warn("Failed fetching attendances", e);
+        }
+      } else {
+        setLogbooks([]);
+        setAttendances([]);
       }
 
       try {
@@ -143,7 +156,7 @@ export const Landing = () => {
     };
 
     fetchData();
-  }, []);
+  }, [authReady, currentUser]);
 
   const groupsK3 = groups.filter(g => g.prodi === 'S1 Kesehatan dan Keselamatan Kerja');
   const groupsKesling = groups.filter(g => g.prodi === 'S1 Kesehatan Lingkungan');
@@ -190,11 +203,11 @@ export const Landing = () => {
             <div className="grid grid-cols-2 gap-2 mt-3 p-2 bg-slate-50 rounded-md border border-slate-100">
               <div className="text-center">
                 <div className="text-[10px] uppercase text-slate-400 font-semibold tracking-wider">Logbook</div>
-                <div className="font-bold text-slate-700 text-lg">{gStats.logs}</div>
+                <div className="font-bold text-slate-700 text-lg">{currentUser ? gStats.logs : '—'}</div>
               </div>
               <div className="text-center border-l border-slate-200">
                 <div className="text-[10px] uppercase text-slate-400 font-semibold tracking-wider">Absensi</div>
-                <div className="font-bold text-slate-700 text-lg">{gStats.atts}</div>
+                <div className="font-bold text-slate-700 text-lg">{currentUser ? gStats.atts : '—'}</div>
               </div>
             </div>
             
@@ -295,7 +308,7 @@ export const Landing = () => {
             <Card className="border-t-4 border-t-yellow-500 shadow-sm">
               <CardContent className="pt-6">
                 <div className="text-sm font-medium text-slate-500 mb-1">Logbook Tercatat</div>
-                <div className="text-4xl font-bold text-slate-800">{loading ? '-' : stats.logbook}</div>
+                <div className="text-4xl font-bold text-slate-800">{loading ? '-' : (currentUser ? stats.logbook : '—')}</div>
               </CardContent>
             </Card>
           </div>
