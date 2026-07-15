@@ -47,35 +47,60 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  try {
-    const upstream = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-          generationConfig: { temperature: 0.7 },
-        }),
-      }
-    );
+  // Coba beberapa model berurutan: nama model preview bisa dipensiunkan
+  // sewaktu-waktu, jadi fallback otomatis ke model stabil.
+  // Bisa dipaksa lewat env GEMINI_MODEL bila perlu.
+  const modelCandidates = [
+    process.env.GEMINI_MODEL,
+    'gemini-3-flash-preview',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+  ].filter(Boolean) as string[];
 
-    const data: any = await upstream.json();
-    if (!upstream.ok) {
-      console.error('Gemini API error:', data);
-      res.status(502).json({ error: 'Layanan AI sedang bermasalah. Coba lagi nanti.' });
-      return;
+  try {
+    let lastErrorDetail = '';
+
+    for (const model of modelCandidates) {
+      const upstream = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            contents,
+            systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+            generationConfig: { temperature: 0.7 },
+          }),
+        }
+      );
+
+      const data: any = await upstream.json().catch(() => ({}));
+
+      if (upstream.ok) {
+        const text = (data.candidates?.[0]?.content?.parts || [])
+          .map((p: any) => p.text || '')
+          .join('');
+        res.status(200).json({ text, model });
+        return;
+      }
+
+      const detail = data.error?.message || `HTTP ${upstream.status}`;
+      console.error(`Gemini API error (model ${model}):`, detail);
+      lastErrorDetail = detail;
+
+      // Model tidak dikenal → coba kandidat berikutnya.
+      // Error lain (key tidak valid, kuota, dsb.) berlaku untuk semua model,
+      // jadi langsung berhenti dan laporkan.
+      const modelNotFound = upstream.status === 404 || /not found|is not supported|unknown name/i.test(detail);
+      if (!modelNotFound) break;
     }
 
-    const text = (data.candidates?.[0]?.content?.parts || [])
-      .map((p: any) => p.text || '')
-      .join('');
-
-    res.status(200).json({ text });
+    // Teruskan pesan error asli dari Google (tanpa API key) agar mudah
+    // didiagnosis: "API key not valid", "quota exceeded", dsb.
+    res.status(502).json({ error: `Layanan AI bermasalah: ${String(lastErrorDetail).slice(0, 300)}` });
   } catch (err) {
     console.error('Chat proxy error:', err);
     res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
