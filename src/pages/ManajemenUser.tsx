@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
+import { generateTempPassword } from '../lib/utils';
 
 export const ManajemenUser = () => {
   const { profile, impersonateUser } = useAuth();
@@ -29,7 +30,14 @@ export const ManajemenUser = () => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [userToReset, setUserToReset] = useState<string | null>(null);
+  const [manualPassword, setManualPassword] = useState('');
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
+
+  // Siapkan password acak setiap kali dialog reset dibuka.
+  useEffect(() => {
+    if (userToReset) setManualPassword(generateTempPassword());
+  }, [userToReset]);
   
   const [isMigrateDialogOpen, setIsMigrateDialogOpen] = useState(false);
   const [userToMigrate, setUserToMigrate] = useState<UserProfile | null>(null);
@@ -88,6 +96,46 @@ export const ManajemenUser = () => {
       }
     } finally {
       setUserToReset(null);
+    }
+  };
+
+  // Reset password langsung (tanpa email) via backend Admin SDK.
+  const handleDirectReset = async () => {
+    if (!userToReset) return;
+    if (manualPassword.length < 6) {
+      toast.error('Password minimal 6 karakter.');
+      return;
+    }
+    try {
+      setIsSettingPassword(true);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        toast.error('Sesi Anda berakhir. Silakan login ulang.');
+        return;
+      }
+      const resp = await fetch('/api/admin-reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ targetUid: userToReset, newPassword: manualPassword })
+      });
+      const data = await resp.json().catch(() => ({} as any));
+      if (!resp.ok) {
+        throw new Error(data.error || `HTTP ${resp.status}`);
+      }
+      try { await navigator.clipboard.writeText(manualPassword); } catch { /* clipboard optional */ }
+      toast.success(
+        `Password berhasil disetel: ${manualPassword} (tersalin ke clipboard). Sampaikan secara aman — pengguna wajib menggantinya saat login.`,
+        { duration: 60000 }
+      );
+      setUserToReset(null);
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Gagal menyetel password: ${error.message || 'error tidak diketahui'}`, { duration: 12000 });
+    } finally {
+      setIsSettingPassword(false);
     }
   };
 
@@ -467,25 +515,59 @@ export const ManajemenUser = () => {
       <Dialog open={!!userToReset} onOpenChange={(open) => !open && setUserToReset(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Kirim Link Reset Password</DialogTitle>
+            <DialogTitle>Reset Password Pengguna</DialogTitle>
             <DialogDescription className="mt-2 text-sm text-slate-500">
-              Sistem Keamanan Firebase Client tidak mengizinkan bypass/mengubah password milik pengguna lain secara langsung tanpa integrasi Admin SDK (Backend).
-              Pengguna akan menerima <strong>email berisi link resmi Firebase</strong> untuk mengatur password baru.
-              <br /><br />
-              <strong className="text-slate-800">Bagaimana Jika Email Mahasiswa Tidak Aktif?</strong>
-              <br />
-              Jika mahasiswa lupa password dan emailnya sudah mati, Anda TIDAK BISA meresetnya lewat email. Satu-satunya solusi:
-              <br />
-              <ol className="list-decimal pl-4 mt-1 text-slate-800">
-                <li>Arahkan Mahasiswa untuk <strong>Mendaftar Ulang (Regitrasi Baru)</strong> menggunakan email baru mereka yang aktif.</li>
-                <li>Setelah mereka terdaftar, kembali ke halaman Manajemen User ini dan klik tombol titik tiga di akun lama mereka.</li>
-                <li>Pilih menu <strong>Migrasi Data UID</strong> &rarr; dan pindahkan data akun lamanya ke akun baru mereka yang baru terdaftar.</li>
-              </ol>
+              Pilih salah satu cara di bawah ini.
             </DialogDescription>
           </DialogHeader>
+
+          <div className="space-y-5">
+            {/* Opsi 1: Setel langsung */}
+            <div className="border rounded-lg p-4 space-y-3 bg-slate-50">
+              <div>
+                <div className="font-semibold text-sm text-slate-800">Opsi 1 — Setel Password Langsung (disarankan)</div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Password baru langsung aktif tanpa email — cocok saat email pengguna bermasalah.
+                  Pengguna akan diwajibkan mengganti password ini saat login.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="manual-password">Password Baru</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="manual-password"
+                    value={manualPassword}
+                    onChange={(e) => setManualPassword(e.target.value)}
+                    minLength={6}
+                    className="font-mono"
+                  />
+                  <Button type="button" variant="outline" onClick={() => setManualPassword(generateTempPassword())}>
+                    Acak Ulang
+                  </Button>
+                </div>
+              </div>
+              <Button onClick={handleDirectReset} disabled={isSettingPassword || manualPassword.length < 6} className="w-full">
+                {isSettingPassword ? 'Menyetel...' : 'Setel Password Ini'}
+              </Button>
+            </div>
+
+            {/* Opsi 2: Kirim email */}
+            <div className="border rounded-lg p-4 space-y-3">
+              <div>
+                <div className="font-semibold text-sm text-slate-800">Opsi 2 — Kirim Email Reset</div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Pengguna menerima email berisi link resmi Firebase untuk mengatur password barunya sendiri.
+                  Hanya berfungsi jika email pengguna masih aktif; periksa juga folder Spam.
+                </p>
+              </div>
+              <Button variant="outline" onClick={confirmResetPassword} className="w-full border-amber-500 text-amber-700 hover:bg-amber-50">
+                Kirim Email Reset
+              </Button>
+            </div>
+          </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUserToReset(null)}>Batal</Button>
-            <Button onClick={confirmResetPassword} className="bg-amber-600 hover:bg-amber-700">Tetap Kirim Email Reset</Button>
+            <Button variant="ghost" onClick={() => setUserToReset(null)}>Batal</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -86,9 +86,36 @@ Kompatibilitas: sebelum script diperbarui, field `idToken` ekstra hanya
 diabaikan — upload tetap berjalan. Verifikasi baru berlaku begitu script
 versi baru di-deploy.
 
-## 3. Variabel Environment — Ringkasan
+## 3. Reset Password Langsung oleh Admin (`api/admin-reset-password.ts`)
+
+Fitur "Setel Password Langsung" di Manajemen User memakai **Firebase Admin
+SDK** di serverless function, sehingga membutuhkan kredensial service
+account:
+
+1. Buka **Firebase Console → Project settings (ikon gerigi) → Service
+   accounts**.
+2. Klik **Generate new private key** → file JSON akan terunduh.
+3. Buka file JSON itu, salin **seluruh isinya**.
+4. Di **Vercel → Project → Settings → Environment Variables**, buat variabel
+   `FIREBASE_SERVICE_ACCOUNT` dan tempelkan seluruh JSON tadi sebagai
+   nilainya (environment: Production & Preview).
+5. Redeploy.
+
+> ⚠️ File JSON service account adalah **kunci akses penuh** ke project
+> Firebase Anda. Jangan pernah menaruhnya di repositori, di kode frontend,
+> atau variabel berprefix `VITE_`. Setelah dipasang di Vercel, hapus file
+> unduhannya dari komputer.
+
+Keamanan endpoint: setiap permintaan wajib membawa Firebase ID token; server
+memverifikasi token lalu mengecek role pemanggil di Firestore — hanya
+Admin/AdminProdi aktif yang dilayani, dan AdminProdi tidak dapat mereset
+akun Admin. Password yang disetel otomatis menandai `mustChangePassword`
+sehingga pengguna wajib menggantinya saat login.
+
+## 4. Variabel Environment — Ringkasan
 
 | Variabel | Lokasi | Terekspos ke browser? |
 |---|---|---|
 | `GEMINI_API_KEY` | Vercel (server) | Tidak — jangan beri prefix `VITE_` |
+| `FIREBASE_SERVICE_ACCOUNT` | Vercel (server) | Tidak — SANGAT rahasia |
 | `VITE_APPS_SCRIPT_URL` | Vercel / `.env.local` | Ya (by design) — aman karena script memverifikasi ID token |
