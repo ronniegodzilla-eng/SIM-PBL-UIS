@@ -28,9 +28,16 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuthenticated() && (
-        ('email' in request.auth.token && request.auth.token.email == "ronniegodzilla@gmail.com") ||
-        ('email' in request.auth.token && request.auth.token.email == "admin@uis.ac.id") ||
-        hasRole('Admin')
+        // Provisioned admin account (from Firestore role) — primary path.
+        hasRole('Admin') ||
+        // Break-glass by email address, but ONLY for a verified inbox so that
+        // signing up with the address alone does not grant admin.
+        (
+          request.auth.token.email_verified == true && (
+            request.auth.token.email == "ronniegodzilla@gmail.com" ||
+            request.auth.token.email == "admin@uis.ac.id"
+          )
+        )
       );
     }
 
@@ -246,7 +253,10 @@ service cloud.firestore {
       allow update: if isValidPBLGroup(request.resource.data) && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tempat_pbl'])) ||
-        ((isDosenPembimbing() || isPembimbingLapangan()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leader_id']))
+        // A supervisor may set the group leader only for a group they supervise.
+        ((isDosenPembimbing() || isPembimbingLapangan())
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leader_id'])
+          && (resource.data.dsn_pembimbing_id == request.auth.uid || resource.data.pmb_lapangan_id == request.auth.uid))
       );
       allow delete: if isAnyAdmin();
     }
@@ -265,9 +275,15 @@ service cloud.firestore {
     }
 
     match /logbooks/{logbookId} {
-      // Public read for aggregate stats
-      allow read: if true;
-      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin());
+      // Restricted to authenticated users: entries contain full activity
+      // narratives that must not be world-readable.
+      allow read: if isAuthenticated();
+      // Students may only file their own entries as 'Pending'; approval is done
+      // later by a supervisor. Admin may seed any status.
+      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (
+        isAnyAdmin() ||
+        (request.resource.data.student_id == request.auth.uid && request.resource.data.status == 'Pending')
+      );
       allow update: if isAuthenticated() && isValidLogbook(request.resource.data) && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
@@ -277,8 +293,15 @@ service cloud.firestore {
     }
 
     match /attendances/{attendanceId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (request.resource.data.student_id == request.auth.uid || isAnyAdmin()) && request.resource.data.keys().hasAll(['documentation_url']) && request.resource.data.documentation_url is string && request.resource.data.documentation_url != '';
+      // Restricted to authenticated users: records include documentation photos
+      // of students that must not be world-readable.
+      allow read: if isAuthenticated();
+      // Students may only file their own attendance as 'Pending'; approval is
+      // done later by a supervisor. Admin may seed any status.
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data)
+        && (request.resource.data.student_id == request.auth.uid || isAnyAdmin())
+        && (isAnyAdmin() || !('status' in request.resource.data) || request.resource.data.status == 'Pending')
+        && request.resource.data.keys().hasAll(['documentation_url']) && request.resource.data.documentation_url is string && request.resource.data.documentation_url != '';
       allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
@@ -293,24 +316,57 @@ service cloud.firestore {
       allow delete: if isAnyAdmin();
     }
 
+    // A group's report may only be touched by that group's leader (student side)
+    // or that group's supervising lecturer — not by every student/lecturer.
+    function isLeaderOfGroup(groupId) {
+      return exists(/databases/$(database)/documents/pbl_groups/$(groupId)) &&
+             get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.leader_id == request.auth.uid;
+    }
+    function isSupervisorOfGroup(groupId) {
+      return exists(/databases/$(database)/documents/pbl_groups/$(groupId)) &&
+             (get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.dsn_pembimbing_id == request.auth.uid ||
+              get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.pmb_lapangan_id == request.auth.uid);
+    }
+
     match /pbl_reports/{reportId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidPBLReport(request.resource.data) && (
-        isAnyAdmin() || 
-        (isMahasiswa() && request.resource.data.status in ['Draft', 'Pending'])
+        isAnyAdmin() ||
+        (isMahasiswa() && request.resource.data.status in ['Draft', 'Pending'] && isLeaderOfGroup(request.resource.data.group_id))
       );
-      allow update: if isAuthenticated() && isValidPBLReport(request.resource.data) && (
-        isAnyAdmin() || 
-        isDosenPembimbing() || 
-        (isMahasiswa() && (resource.data.status != 'Approved' || (request.resource.data.status == 'Pending' && request.resource.data.approval_url != '')) && resource.data.revisi_status != 'Approved')
+      allow update: if isAuthenticated() && isValidPBLReport(request.resource.data)
+        && request.resource.data.group_id == resource.data.group_id && (
+        isAnyAdmin() ||
+        (isDosenPembimbing() && isSupervisorOfGroup(resource.data.group_id)) ||
+        (isMahasiswa() && isLeaderOfGroup(resource.data.group_id) && (resource.data.status != 'Approved' || (request.resource.data.status == 'Pending' && request.resource.data.approval_url != '')) && resource.data.revisi_status != 'Approved')
       );
       allow delete: if isAnyAdmin();
     }
 
+    // A grade may only be written by a party actually entitled to score that
+    // category. Crucially, a student can ONLY create a PeerReview grade, and
+    // never for themselves — closing the self-grading exploit.
+    function canWriteGrade(data) {
+      return (data.evaluator_id == request.auth.uid || isSuperAdmin()) && (
+        (data.category == 'PeerReview' && isMahasiswa() && data.student_id != request.auth.uid) ||
+        (data.category == 'Sosialisasi' && isAnyAdmin()) ||
+        (data.category == 'DosenPembimbing' && (isDosenPembimbing() || isAnyAdmin())) ||
+        (data.category == 'DosenPenguji' && (isDosenPenguji() || isAnyAdmin())) ||
+        (data.category == 'PembimbingLapangan' && (isPembimbingLapangan() || isDosenPembimbing() || isAnyAdmin()))
+      );
+    }
+
     match /grades/{gradeId} {
-      allow read: if isAuthenticated();
-      allow create: if isActiveUser() && isValidGrade(request.resource.data) && (request.resource.data.evaluator_id == request.auth.uid || isSuperAdmin());
-      allow update: if isActiveUser() && isValidGrade(request.resource.data) && (request.resource.data.evaluator_id == request.auth.uid || isSuperAdmin()) && (resource.data.evaluator_id == request.auth.uid || isSuperAdmin());
+      // Scores are visible to evaluating staff/admin, to the owning student, and
+      // to the peer who authored a given grade — not to every logged-in user.
+      allow read: if isAuthenticated() && (
+        isAnyAdmin() ||
+        isDosenPembimbing() || isDosenPenguji() || isPembimbingLapangan() ||
+        resource.data.student_id == request.auth.uid ||
+        resource.data.evaluator_id == request.auth.uid
+      );
+      allow create: if isActiveUser() && isValidGrade(request.resource.data) && canWriteGrade(request.resource.data);
+      allow update: if isActiveUser() && isValidGrade(request.resource.data) && canWriteGrade(request.resource.data) && (resource.data.evaluator_id == request.auth.uid || isSuperAdmin());
       allow delete: if isAnyAdmin();
     }
 
