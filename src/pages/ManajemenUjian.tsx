@@ -180,6 +180,25 @@ export const ManajemenUjian = () => {
     return matches.find(r => r.id === `report_${groupId}`) || matches[0];
   };
 
+  // Field `status` dipakai dua tahap (bimbingan dosen & verifikasi admin),
+  // jadi tahap sebenarnya diturunkan dari kombinasi status + approval_url:
+  // approval_url baru terisi setelah mahasiswa mengunggah berkas syarat ujian.
+  type ReportStage = 'Bimbingan' | 'MenungguBerkas' | 'MenungguValidasi' | 'DikembalikanAdmin' | 'Tervalidasi';
+  const getReportStage = (report: any): ReportStage => {
+    if (report.status === 'Pending') return 'MenungguValidasi';
+    if (report.status === 'Approved') return report.approval_url ? 'Tervalidasi' : 'MenungguBerkas';
+    if (report.status === 'Revisi') return report.approval_url ? 'DikembalikanAdmin' : 'Bimbingan';
+    return 'Bimbingan';
+  };
+
+  const STAGE_LABEL: Record<ReportStage, string> = {
+    Bimbingan: 'Proses Bimbingan',
+    MenungguBerkas: 'Disetujui Pembimbing — Menunggu Berkas',
+    MenungguValidasi: 'Menunggu Validasi Admin',
+    DikembalikanAdmin: 'Dikembalikan (Tidak MS)',
+    Tervalidasi: 'Tervalidasi',
+  };
+
   const handleUpdateReportStatus = async (reportId: string, status: string) => {
     try {
       await updateDoc(doc(db, 'pbl_reports', reportId), {
@@ -209,7 +228,7 @@ export const ManajemenUjian = () => {
           <Card>
             <CardHeader>
               <CardTitle>Daftar Kelompok & Eligibilitas Ujian</CardTitle>
-              <CardDescription>Kelompok yang telah dinilai "Approved" oleh Dosen Pembimbing dapat dijadwalkan. Admin dapat Kembalikan laporan (Revisi) jika syarat tidak penuhi kewajiban administratif.</CardDescription>
+              <CardDescription>Persetujuan Dosen Pembimbing hanya menyelesaikan tahap bimbingan. Kelompok baru dapat dijadwalkan setelah mahasiswa mengunggah berkas syarat ujian dan Admin memvalidasinya ("Setujui Syarat Admin"). Admin dapat mengembalikan berkas (Tidak MS) jika kewajiban administratif belum terpenuhi.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -227,31 +246,32 @@ export const ManajemenUjian = () => {
                   {groups.map((group) => {
                     const report = findReport(group.id);
                     const schedule = schedules.find(s => s.group_id === group.id);
-                    const isEligible = report && report.status === 'Approved';
+                    const stage = report ? getReportStage(report) : null;
+                    const isEligible = stage === 'Tervalidasi';
 
                     return (
                       <TableRow key={group.id}>
                         <TableCell className="font-medium">{group.group_name}</TableCell>
                         <TableCell>{group.prodi || 'Tidak Spesifik'}</TableCell>
                         <TableCell>
-                          {report ? (
+                          {report && stage ? (
                             <div className="flex flex-col gap-1 items-start">
-                              <Badge variant={report.status === 'Approved' ? 'default' : report.status === 'Revisi' ? 'destructive' : 'secondary'}>
-                                {report.status}
+                              <Badge variant={stage === 'Tervalidasi' ? 'default' : stage === 'DikembalikanAdmin' ? 'destructive' : 'secondary'}>
+                                {STAGE_LABEL[stage]}
                               </Badge>
-                              {report.status !== 'Revisi' && report.status !== 'Approved' && (
-                                <Button variant="outline" size="sm" className="h-6 text-[10px] mt-1" onClick={() => handleUpdateReportStatus(report.id, 'Revisi')}>
-                                  Kembalikan (Tidak MS)
-                                </Button>
+                              {stage === 'MenungguValidasi' && (
+                                <>
+                                  <Button size="sm" variant="default" className="h-6 text-[10px] mt-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleUpdateReportStatus(report.id, 'Approved')}>
+                                    Setujui Syarat Admin
+                                  </Button>
+                                  <Button variant="outline" size="sm" className="h-6 text-[10px] mt-1" onClick={() => handleUpdateReportStatus(report.id, 'Revisi')}>
+                                    Kembalikan (Tidak MS)
+                                  </Button>
+                                </>
                               )}
-                              {report.status === 'Revisi' && (
+                              {stage === 'DikembalikanAdmin' && (
                                 <Button variant="outline" size="sm" className="h-6 text-[10px] mt-1" onClick={() => handleUpdateReportStatus(report.id, 'Pending')}>
                                   Tandai Pending
-                                </Button>
-                              )}
-                              {(report.status === 'Pending' || report.status === 'Draft') && (
-                                <Button size="sm" variant="default" className="h-6 text-[10px] mt-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleUpdateReportStatus(report.id, 'Approved')}>
-                                  Setujui Syarat Admin
                                 </Button>
                               )}
                             </div>
