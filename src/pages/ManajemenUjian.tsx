@@ -172,6 +172,14 @@ export const ManajemenUjian = () => {
     }
   };
 
+  // Pilih dokumen report kanonik (report_<group_id>) agar berkas yang diunggah
+  // mahasiswa selalu terbaca, meskipun ada dokumen duplikat untuk grup yang sama.
+  const findReport = (groupId: string) => {
+    const matches = reports.filter(r => r.group_id === groupId);
+    if (matches.length === 0) return undefined;
+    return matches.find(r => r.id === `report_${groupId}`) || matches[0];
+  };
+
   const handleUpdateReportStatus = async (reportId: string, status: string) => {
     try {
       await updateDoc(doc(db, 'pbl_reports', reportId), {
@@ -217,7 +225,7 @@ export const ManajemenUjian = () => {
                 </TableHeader>
                 <TableBody>
                   {groups.map((group) => {
-                    const report = reports.find(r => r.group_id === group.id);
+                    const report = findReport(group.id);
                     const schedule = schedules.find(s => s.group_id === group.id);
                     const isEligible = report && report.status === 'Approved';
 
@@ -257,10 +265,30 @@ export const ManajemenUjian = () => {
                               {report.report_title && (
                                 <span className="font-semibold text-slate-800 break-words mb-1">{report.report_title}</span>
                               )}
-                              <a href={report.report_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Draf Laporan</a>
-                              <a href={report.approval_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Persetujuan</a>
-                              {report.custom_exam_urls && Object.entries(report.custom_exam_urls).map(([key, url]) => (
-                                <a key={key} href={url as string} target="_blank" rel="noreferrer" className="text-primary hover:underline">{key}</a>
+                              {report.report_url ? (
+                                <a href={report.report_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Draf Laporan</a>
+                              ) : (
+                                <span className="text-slate-400 italic">Draf Laporan: belum diunggah</span>
+                              )}
+                              {report.approval_url ? (
+                                <a href={report.approval_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Lembar Persetujuan</a>
+                              ) : (
+                                <span className="text-slate-400 italic">Lembar Persetujuan: belum diunggah</span>
+                              )}
+                              {settings.exam.map((req) => (
+                                report.custom_exam_urls?.[req] ? (
+                                  <a key={req} href={report.custom_exam_urls[req] as string} target="_blank" rel="noreferrer" className="text-primary hover:underline">{req}</a>
+                                ) : (
+                                  <span key={req} className="text-slate-400 italic">{req}: belum diunggah</span>
+                                )
+                              ))}
+                              {report.custom_exam_urls && Object.entries(report.custom_exam_urls)
+                                .filter(([key]) => !settings.exam.includes(key))
+                                .map(([key, url]) => (
+                                  <a key={key} href={url as string} target="_blank" rel="noreferrer" className="text-primary hover:underline">{key}</a>
+                                ))}
+                              {report.custom_revisi_urls && Object.entries(report.custom_revisi_urls).map(([key, url]) => (
+                                <a key={`revisi-${key}`} href={url as string} target="_blank" rel="noreferrer" className="text-emerald-600 hover:text-emerald-700 hover:underline">(Revisi) {key}</a>
                               ))}
                             </div>
                           ) : (
@@ -332,7 +360,7 @@ export const ManajemenUjian = () => {
                 </TableHeader>
                 <TableBody>
                   {groups.filter(g => schedules.some(s => s.group_id === g.id)).map((group) => {
-                    const report = reports.find(r => r.group_id === group.id);
+                    const report = findReport(group.id);
                     if (!report || !report.custom_revisi_urls) return null;
 
                     return (
@@ -374,9 +402,9 @@ export const ManajemenUjian = () => {
                       </TableRow>
                     );
                   })}
-                  {groups.filter(g => schedules.some(s => s.group_id === g.id) && reports.some(r => r.group_id === g.id && r.custom_revisi_urls)).length === 0 && (
+                  {groups.filter(g => schedules.some(s => s.group_id === g.id) && findReport(g.id)?.custom_revisi_urls).length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-slate-500 py-6">Belum ada kelompok yang mengunggah revisi pasca-ujian.</TableCell>
+                      <TableCell colSpan={5} className="text-center text-slate-500 py-6">Belum ada kelompok yang mengunggah revisi pasca-ujian.</TableCell>
                     </TableRow>
                   )}
                 </TableBody>
