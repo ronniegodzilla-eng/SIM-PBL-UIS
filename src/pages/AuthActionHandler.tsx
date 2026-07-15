@@ -52,7 +52,19 @@ export const AuthActionHandler = () => {
       navigate('/login');
     } catch (error: any) {
       console.error(error);
-      toast.error('Gagal merubah password: ' + (error.message || 'Error tidak diketahui'));
+      if (error.code === 'auth/expired-action-code') {
+        toast.error('Tautan reset password sudah kadaluarsa. Minta tautan baru lewat "Lupa Password" di halaman login.', { duration: 12000 });
+        setIsValidCode(false);
+      } else if (error.code === 'auth/invalid-action-code') {
+        toast.error('Tautan reset password sudah pernah dipakai atau tidak valid. Minta tautan baru lewat "Lupa Password".', { duration: 12000 });
+        setIsValidCode(false);
+      } else if (error.code === 'auth/weak-password') {
+        toast.error('Password terlalu lemah. Gunakan minimal 6 karakter.');
+      } else if (error.code === 'auth/network-request-failed') {
+        toast.error('Koneksi internet bermasalah. Coba lagi.');
+      } else {
+        toast.error('Gagal mengubah password: ' + (error.code || error.message || 'Error tidak diketahui'));
+      }
     } finally {
       setLoading(false);
     }
