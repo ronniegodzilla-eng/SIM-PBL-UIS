@@ -91,10 +91,14 @@ export const Login = () => {
       setResetEmail('');
     } catch (error: any) {
       console.error(error);
-      if (error.code === 'auth/user-not-found') {
+      if (error.code === 'auth/too-many-requests') {
+        toast.error('Terlalu banyak permintaan reset dalam waktu singkat. Mohon tunggu 5-10 menit, lalu coba lagi.', { duration: 12000 });
+      } else if (error.code === 'auth/user-not-found') {
         toast.error('Pengguna dengan email ini tidak ditemukan (pastikan ejaan benar).');
       } else if (error.code === 'auth/invalid-email') {
         toast.error('Format email tidak valid.');
+      } else if (error.code === 'auth/network-request-failed') {
+        toast.error('Koneksi internet bermasalah. Coba lagi.');
       } else {
         toast.error('Gagal mengirim email reset password. Coba lagi nanti.');
       }

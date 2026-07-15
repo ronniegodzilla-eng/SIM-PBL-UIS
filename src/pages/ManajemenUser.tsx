@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, writeBatch, where } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { UserProfile, useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -62,15 +62,30 @@ export const ManajemenUser = () => {
       const userObj = allUsers.find(u => u.uid === userToReset);
       if (userObj && userObj.email) {
         const { sendPasswordResetEmail } = await import('firebase/auth');
-        const { getAuth } = await import('firebase/auth');
-        const auth = getAuth();
         await sendPasswordResetEmail(auth, userObj.email);
-        toast.success(`Link reset password terkirim ke ${userObj.email}. Pastikan email aktif, jika tidak maka tidak akan pernah sampai. Periksa Inbox/Spam.`);
+        toast.success(
+          `Link reset password terkirim ke ${userObj.email}. Minta pengguna memeriksa Inbox/Spam. ` +
+          `Jika email tidak kunjung tiba, kemungkinan alamat ini berbeda dengan email login yang terdaftar — cek di Firebase Console > Authentication.`,
+          { duration: 15000 }
+        );
       } else {
         toast.error('Email pengguna tidak ditemukan.');
       }
-    } catch (error) {
-      toast.error('Gagal mengirim link reset password.');
+    } catch (error: any) {
+      console.error(error);
+      // Firebase membatasi ketat frekuensi email reset; tanpa pesan spesifik,
+      // admin mengira fiturnya rusak padahal cukup menunggu beberapa menit.
+      if (error.code === 'auth/too-many-requests') {
+        toast.error('Terlalu banyak permintaan reset dalam waktu singkat (batas keamanan Firebase). Tunggu 5-10 menit, lalu coba lagi.', { duration: 15000 });
+      } else if (error.code === 'auth/user-not-found') {
+        toast.error('Email ini tidak terdaftar di sistem login (Firebase Auth). Kemungkinan akun dibuat dengan email berbeda — cek di Firebase Console > Authentication.', { duration: 15000 });
+      } else if (error.code === 'auth/invalid-email') {
+        toast.error('Format email pengguna ini tidak valid.');
+      } else if (error.code === 'auth/network-request-failed') {
+        toast.error('Koneksi internet bermasalah. Coba lagi.');
+      } else {
+        toast.error(`Gagal mengirim link reset password. (${error.code || error.message || 'error tidak diketahui'})`, { duration: 10000 });
+      }
     } finally {
       setUserToReset(null);
     }
