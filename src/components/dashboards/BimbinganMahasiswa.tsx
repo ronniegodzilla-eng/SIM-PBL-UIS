@@ -29,8 +29,11 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
     const qReport = query(collection(db, 'pbl_reports'), where('group_id', '==', groupMember.group_id));
     const unsubReport = onSnapshot(qReport, (snapshot) => {
       if (!snapshot.empty) {
-        const d = snapshot.docs[0].data();
-        setReport({ id: snapshot.docs[0].id, ...d });
+        // Selalu gunakan dokumen kanonik report_<group_id> jika ada duplikat,
+        // agar riwayat dan berkas terbaca konsisten di semua sisi.
+        const reportDoc = snapshot.docs.find(d => d.id === `report_${groupMember.group_id}`) || snapshot.docs[0];
+        const d = reportDoc.data();
+        setReport({ id: reportDoc.id, ...d });
         if (d.report_title) setReportTitle(d.report_title);
       } else {
         setReport(null);
