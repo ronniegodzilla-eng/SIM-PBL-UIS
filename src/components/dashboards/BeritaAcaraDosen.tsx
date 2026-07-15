@@ -8,6 +8,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
+import { uploadToGoogleDrive } from '../../lib/uploadFile';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import jsPDF from 'jspdf';
@@ -182,47 +183,6 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        let encoded = reader.result?.toString() || '';
-        // remove the data:MIME_TYPE;base64, prefix
-        const b64 = encoded.split(',')[1];
-        resolve(b64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  const uploadToGoogleDrive = async (file: File, prefix: string) => {
-    const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-    if (!scriptUrl) {
-      throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
-    }
-
-    const base64 = await fileToBase64(file);
-    const filename = `${prefix}_${Date.now()}_${file.name}`;
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        filename: filename,
-        mimeType: file.type,
-        base64: base64
-      }),
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      }
-    });
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal mengunggah ke Google Drive');
-    }
-    return data.url;
-  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

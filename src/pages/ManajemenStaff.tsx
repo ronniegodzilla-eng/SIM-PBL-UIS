@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, secondaryAuth } from '../firebase';
 import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { generateTempPassword } from '../lib/utils';
 import { UserProfile, useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -35,7 +36,8 @@ export const ManajemenStaff = () => {
     try {
       setIsCreatingStaff(true);
       
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newStaff.email, 'ubahsaya');
+      const tempPassword = generateTempPassword();
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newStaff.email, tempPassword);
       const newUserId = userCredential.user.uid;
       
       await setDoc(doc(db, 'users', newUserId), {
@@ -49,8 +51,9 @@ export const ManajemenStaff = () => {
       });
       
       await signOut(secondaryAuth);
-      
-      toast.success('Akun staff berhasil dibuat. Password default: ubahsaya');
+
+      try { await navigator.clipboard.writeText(tempPassword); } catch { /* clipboard optional */ }
+      toast.success(`Akun staff berhasil dibuat. Password sementara: ${tempPassword} (sudah disalin ke clipboard — sampaikan secara aman ke pemilik akun)`, { duration: 60000 });
       setNewStaff({ name: '', email: '', role: 'Dosen' });
     } catch (error: any) {
       console.error(error);

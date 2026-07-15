@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, arrayUnion } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { Badge } from '../ui/badge';
+import { uploadToGoogleDrive } from '../../lib/uploadFile';
 
 export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
   const { profile } = useAuth();
@@ -46,53 +47,13 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
     };
   }, [profile, groupMember]);
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const uploadToGoogleDrive = async (file: File, prefix: string) => {
-    const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-    if (!scriptUrl) {
-      throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
-    }
-
-    const base64 = await fileToBase64(file);
-    const filename = `${groupMember.group_id}_${prefix}_${Date.now()}_${file.name}`;
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        filename: filename,
-        mimeType: file.type,
-        base64: base64
-      }),
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      }
-    });
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal mengunggah ke Google Drive');
-    }
-    return data.url;
-  };
-
   const handleUploadDraf = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!drafFile || !groupMember || groupMember.group_id === 'pending') return;
 
     try {
       setLoading(true);
-      const drafUrl = await uploadToGoogleDrive(drafFile, 'draf_bimbingan');
+      const drafUrl = await uploadToGoogleDrive(drafFile, `${groupMember.group_id}_draf_bimbingan`);
       const reportId = `report_${groupMember.group_id}`;
       
       const historyItem = {
@@ -108,7 +69,7 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
         report_title: reportTitle,
         report_url: drafUrl,
         status: 'Draft',
-        history: [...(report?.history || []), historyItem],
+        history: arrayUnion(historyItem),
         createdAt: report?.createdAt || new Date().toISOString()
       }, { merge: true });
 

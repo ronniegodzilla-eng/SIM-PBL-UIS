@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, setDoc, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, storage } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { uploadToGoogleDrive } from '../../lib/uploadFile';
 
 export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string }) => {
   const { profile } = useAuth();
@@ -52,53 +52,13 @@ export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string
 
       await updateDoc(doc(db, 'pbl_reports', report.id), { 
         status: 'Approved',
-        history: [...(report?.history || []), historyItem]
+        history: arrayUnion(historyItem)
       });
       toast.success('Laporan disetujui');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `pbl_reports/${report.id}`);
       toast.error('Gagal menyetujui laporan');
     }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const uploadToGoogleDrive = async (file: File, prefix: string) => {
-    const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-    if (!scriptUrl) {
-      throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
-    }
-
-    const base64 = await fileToBase64(file);
-    const filename = `${prefix}_${Date.now()}_${file.name}`;
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        filename: filename,
-        mimeType: file.type,
-        base64: base64
-      }),
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      }
-    });
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Gagal mengunggah ke Google Drive');
-    }
-    return data.url;
   };
 
   const handleUploadFeedback = async (e: React.FormEvent, report: any) => {
@@ -128,7 +88,7 @@ export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string
         ...(downloadURL && { feedback_url: downloadURL }),
         ...(feedbackText.trim() && { feedback_text: feedbackText.trim() }),
         status: 'Revisi',
-        history: [...(report?.history || []), historyItem]
+        history: arrayUnion(historyItem)
       });
 
       toast.success('Feedback berhasil dikirim.');
@@ -215,7 +175,11 @@ export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string
                   </TableCell>
                   {role === 'Dosen' && (
                     <TableCell className="text-right space-x-2">
-                      <Dialog>
+                      <Dialog onOpenChange={(open) => {
+                        // Bersihkan state bersama saat dialog dibuka agar catatan/file
+                        // dari kelompok lain tidak terbawa ke kelompok ini.
+                        if (open) { setFeedbackText(''); setFile(null); }
+                      }}>
                         <DialogTrigger render={<Button size="sm" variant="outline">Bimbingan / Revisi</Button>} />
                         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>

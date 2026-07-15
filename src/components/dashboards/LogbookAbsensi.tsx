@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
+import { uploadToGoogleDrive } from '../../lib/uploadFile';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
@@ -20,21 +21,6 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
   const [newAttendance, setNewAttendance] = useState({ date: '', type: 'Lapangan', is_present: true, other_text: '' });
   const [documentationFile, setDocumentationFile] = useState<File | null>(null);
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        let encoded = reader.result?.toString().replace(/^data:(.*,)?/, '');
-        if ((encoded!.length % 4) > 0) {
-          encoded += '='.repeat(4 - (encoded!.length % 4));
-        }
-        resolve(encoded || '');
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
 
   useEffect(() => {
     if (!profile || !groupMember) return;
@@ -104,32 +90,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
       let documentationUrl = '';
 
       if (documentationFile) {
-        const scriptUrl = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-        if (!scriptUrl) {
-          throw new Error('URL Google Apps Script belum dikonfigurasi di Environment Variables.');
-        }
-
-        const base64 = await fileToBase64(documentationFile);
-        const filename = `att_${profile.uid}_${Date.now()}_${documentationFile.name}`;
-
-        const response = await fetch(scriptUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            filename: filename,
-            mimeType: documentationFile.type,
-            base64: base64
-          }),
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8',
-          }
-        });
-
-        const data = await response.json();
-        if (data.success) {
-          documentationUrl = data.url;
-        } else {
-          throw new Error('Gagal mengunggah dokumentasi: ' + (data.error || 'Unknown error'));
-        }
+        documentationUrl = await uploadToGoogleDrive(documentationFile, `att_${profile.uid}`);
       }
 
       const attData: any = {

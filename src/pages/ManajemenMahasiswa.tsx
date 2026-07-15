@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
+import { generateTempPassword } from '../lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -105,7 +106,8 @@ export const ManajemenMahasiswa = () => {
     try {
       setIsCreatingMahasiswa(true);
       
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newMahasiswa.email, 'ubahsaya');
+      const tempPassword = generateTempPassword();
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newMahasiswa.email, tempPassword);
       const newUserId = userCredential.user.uid;
       
       await setDoc(doc(db, 'users', newUserId), {
@@ -122,7 +124,8 @@ export const ManajemenMahasiswa = () => {
       
       await signOut(secondaryAuth);
       
-      toast.success('Akun mahasiswa berhasil dibuat. Password default: ubahsaya');
+      try { await navigator.clipboard.writeText(tempPassword); } catch { /* clipboard optional */ }
+      toast.success(`Akun mahasiswa berhasil dibuat. Password sementara: ${tempPassword} (sudah disalin ke clipboard — sampaikan secara aman ke mahasiswa)`, { duration: 60000 });
       setNewMahasiswa({ name: '', email: '', prodi: '', jalur: '' });
     } catch (error: any) {
       console.error(error);
@@ -270,7 +273,7 @@ export const ManajemenMahasiswa = () => {
               <DialogHeader>
                 <DialogTitle>Tambah Akun Mahasiswa</DialogTitle>
                 <DialogDescription>
-                  Buat akun mahasiswa secara manual. Password default adalah "ubahsaya".
+                  Buat akun mahasiswa secara manual. Password sementara dibuat acak dan ditampilkan setelah akun berhasil dibuat.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreateMahasiswa} className="space-y-4">

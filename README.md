@@ -1,20 +1,61 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# SI PBL FIKES — Sistem Informasi Praktik Belajar Lapangan
 
-# Run and deploy your AI Studio app
+Sistem Informasi PBL Fakultas Ilmu Kesehatan Universitas Ibnu Sina: mengelola
+siklus PBL dari pembentukan kelompok, logbook & absensi harian, bimbingan
+laporan, pendaftaran & penjadwalan ujian, hingga penilaian dan rekap nilai.
 
-This contains everything you need to run your app locally.
+## Teknologi
 
-View your app in AI Studio: https://ai.studio/apps/ab4461e6-4024-404d-803b-03eb10d1fa0d
+- **Frontend:** React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui
+- **Backend:** Firebase (Auth, Firestore) + Vercel Serverless (`api/`)
+- **Penyimpanan berkas:** Google Drive via Google Apps Script
+- **Chatbot:** Gemini API (via proxy server `api/chat.ts`)
 
-## Run Locally
+## Menjalankan Secara Lokal
 
-**Prerequisites:**  Node.js
+Prasyarat: Node.js 18+
 
+```bash
+npm install
+npm run dev        # buka http://localhost:3000
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Buat `.env.local` untuk fitur upload berkas:
+
+```
+VITE_APPS_SCRIPT_URL=<URL web app Google Apps Script>
+```
+
+> Catatan: chatbot Asisten AI memakai serverless function `/api/chat` yang
+> tidak tersedia di `npm run dev`. Gunakan `vercel dev` bila perlu mengujinya
+> secara lokal.
+
+## Deploy
+
+Aplikasi di-deploy ke **Vercel**. Environment variable yang dibutuhkan dan
+langkah pengamanan endpoint upload dijelaskan di
+[docs/SECURITY_SETUP.md](docs/SECURITY_SETUP.md).
+
+Aturan akses data ada di `firestore.rules` — setiap perubahan file ini harus
+di-publish manual ke Firebase Console (Firestore Database → pilih database
+`ai-studio-ab4461e6-...` → Rules).
+
+## Struktur Proyek
+
+```
+api/                  Serverless functions (proxy Gemini)
+src/
+  components/         Komponen UI & dashboard per fitur
+  contexts/           AuthContext (login, profil, peran)
+  pages/              Halaman per route
+  lib/                Utilitas (upload berkas, dsb.)
+  docs/               Panduan pengguna per peran
+firestore.rules       Aturan akses Firestore
+```
+
+## Verifikasi
+
+```bash
+npm run lint    # type-check (tsc --noEmit)
+npm run build   # build produksi
+```

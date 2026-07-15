@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDocs, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -86,11 +86,19 @@ export const ManajemenUjian = () => {
       return;
     }
 
-    // Detect conflicts
+    // Detect conflicts terhadap data TERBARU dari server (bukan state lokal
+    // yang bisa basi) untuk memperkecil peluang bentrok saat dua admin
+    // menjadwalkan bersamaan.
     const currentGroup = groups.find(g => g.id === selectedGroupId);
     const newGroupPembimbingId = currentGroup?.pembimbing_id;
 
-    for (const s of schedules) {
+    let latestSchedules = schedules;
+    try {
+      const freshSnap = await getDocs(collection(db, 'exam_schedules'));
+      latestSchedules = freshSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    } catch { /* jika gagal, pakai state lokal sebagai fallback */ }
+
+    for (const s of latestSchedules) {
       // Skip if we're just updating the same group
       if (s.group_id === selectedGroupId) continue;
 
@@ -148,9 +156,10 @@ export const ManajemenUjian = () => {
     if (!val.trim()) return;
 
     try {
-      const newReqs = [...settings[type], val.trim()];
+      // arrayUnion menghindari read-modify-write: dua admin yang menambah
+      // bersamaan tidak akan saling menimpa daftar syarat.
       await setDoc(doc(db, 'settings', 'requirements'), {
-        [type]: newReqs
+        [type]: arrayUnion(val.trim())
       }, { merge: true });
       if (type === 'exam') setExamReqInput('');
       else setRevisiReqInput('');
@@ -162,9 +171,8 @@ export const ManajemenUjian = () => {
 
   const handleRemoveRequirement = async (type: 'exam' | 'revisi', index: number) => {
     try {
-      const newReqs = settings[type].filter((_, i) => i !== index);
       await setDoc(doc(db, 'settings', 'requirements'), {
-        [type]: newReqs
+        [type]: arrayRemove(settings[type][index])
       }, { merge: true });
       toast.success('Syarat berhasil dihapus');
     } catch (error) {

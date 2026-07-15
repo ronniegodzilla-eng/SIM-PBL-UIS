@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from './ui/card';
 import { Input } from './ui/input';
@@ -8,37 +7,15 @@ import { Sparkles, X, Send, Loader2, MessageSquare, Trash2 } from 'lucide-react'
 import { cn } from '../lib/utils';
 import Markdown from 'react-markdown';
 
-// Try to initialize Gemini API. Error will be caught in generation if missing.
-let ai: GoogleGenAI | null = null;
-try {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (apiKey) {
-    ai = new GoogleGenAI({ apiKey });
-  }
-} catch (error) {
-  console.error("Failed to initialize GoogleGenAI", error);
-}
-
 interface Message {
   role: 'user' | 'model';
   content: string;
 }
 
-const SYSTEM_INSTRUCTION = `
-Anda adalah Asisten AI untuk Sistem Manajemen Praktik Belajar Lapangan (PBL).
-Tugas Anda adalah membantu Mahasiswa, Dosen Pembimbing, Pembimbing Lapangan, Dosen Penguji, Admin, serta pengunjung yang belum login dalam menggunakan sistem ini.
-Sistem ini memiliki fitur:
-- Manajemen Kelompok PBL & Mahasiswa
-- Jurnal/Logbook Harian (diisi Mahasiswa, disetujui Pembimbing Lapangan/Dosen)
-- Absensi (diisi Mahasiswa, disetujui Pembimbing Lapangan/Dosen)
-- Penilaian (dilakukan oleh Dosen Pembimbing, Pembimbing Lapangan, Penguji, dan Teman Sejawat/Peer Review)
-- Rekapitulasi Nilai
-
-Berikan jawaban yang ramah, ringkas, informatif, dan membantu dengan format markdown.
-Gunakan bahasa Indonesia yang profesional.
-`;
-
 const CHAT_STORAGE_KEY = 'pbl_ai_chat_history';
+// Batas riwayat: yang dikirim ke server dan yang disimpan di localStorage.
+const MAX_HISTORY_SENT = 20;
+const MAX_HISTORY_STORED = 40;
 
 export const AIChat = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -64,7 +41,7 @@ export const AIChat = () => {
   };
 
   useEffect(() => {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-MAX_HISTORY_STORED)));
   }, [messages]);
 
   useEffect(() => {
@@ -75,64 +52,34 @@ export const AIChat = () => {
     e?.preventDefault();
     if (!inputMessage.trim()) return;
 
-    if (!ai) {
-      setMessages(prev => [...prev, 
-        { role: 'user', content: inputMessage },
-        { role: 'model', content: 'Maaf, API Key Gemini tidak ditemukan atau belum dikonfigurasi pada environment `process.env.GEMINI_API_KEY`. Silakan hubungi administrator.' }
-      ]);
-      setInputMessage('');
-      return;
-    }
-
     const newMessage: Message = { role: 'user', content: inputMessage };
     setMessages(prev => [...prev, newMessage]);
     setInputMessage('');
     setIsLoading(true);
 
     try {
-      // Create chat history format for gemini
-      const chatHistory = messages.map(msg => ({
-        role: msg.role === 'model' ? 'model' : 'user',
-        parts: [{ text: msg.content }]
-      }));
+      // Riwayat dikirim ke proxy server (/api/chat) — API key Gemini
+      // tersimpan aman di server, tidak pernah dikirim ke browser.
+      const history = [...messages, newMessage].slice(-MAX_HISTORY_SENT);
 
-      // Set up the chat session
-      const chat = ai.chats.create({
-        model: 'gemini-3-flash-preview',
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-        }
-      });
-      
-      // Since ai.chats.create does not take history directly in this version based on docs, 
-      // we'll use a simpler approach: passing history to contents or generating a single prompt with history.
-      // Better yet, according to the latest SDK, ai.chats doesn't immediately let us pass history on create in the basic example,
-      // but we can pass history in generateContent, OR just pass history to chats.
-      
-      const contents = [
-        ...messages.map(msg => ({
-          role: msg.role,
-          parts: [{ text: msg.content }]
-        })),
-        { role: 'user', parts: [{ text: newMessage.content }] }
-      ];
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: contents,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.7,
-        }
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history })
       });
 
-      const text = response.text;
-      if (text) {
-        setMessages(prev => [...prev, { role: 'model', content: text }]);
+      const data = await response.json().catch(() => ({} as any));
+      if (!response.ok) {
+        throw new Error(data.error || 'Server error');
       }
-    } catch (error) {
+
+      if (data.text) {
+        setMessages(prev => [...prev, { role: 'model', content: data.text }]);
+      }
+    } catch (error: any) {
       console.error("AI Error:", error);
-      setMessages(prev => [...prev, { role: 'model', content: 'Maaf, terjadi kesalahan saat memproses pesan Anda. Coba lagi nanti.' }]);
+      const detail = typeof error?.message === 'string' && error.message !== 'Server error' ? ` (${error.message})` : '';
+      setMessages(prev => [...prev, { role: 'model', content: `Maaf, terjadi kesalahan saat memproses pesan Anda. Coba lagi nanti.${detail}` }]);
     } finally {
       setIsLoading(false);
     }
