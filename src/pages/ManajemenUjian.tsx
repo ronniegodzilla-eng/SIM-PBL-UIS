@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs } from 'firebase/firestore';
-import { ArrowUp, ArrowDown, Pencil } from 'lucide-react';
+import { ArrowUp, ArrowDown, Pencil, Download } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -276,6 +278,106 @@ export const ManajemenUjian = () => {
     return matches.find(r => r.id === `report_${groupId}`) || matches[0];
   };
 
+  // ===== Ekspor PDF (jadwal ujian & rekap revisi) =====
+  const addPdfHeader = (doc: jsPDF, title: string) => {
+    const pageW = doc.internal.pageSize.getWidth();
+    doc.setFontSize(14);
+    doc.text(title, pageW / 2, 16, { align: 'center' });
+    doc.setFontSize(11);
+    doc.text('Fakultas Ilmu Kesehatan (Fikes), Universitas Ibnu Sina', pageW / 2, 23, { align: 'center' });
+    doc.setLineWidth(0.5);
+    doc.line(14, 27, pageW - 14, 27);
+    doc.setFontSize(9);
+    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 33);
+  };
+
+  const addSignatureBlock = (doc: jsPDF) => {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = ((doc as any).lastAutoTable?.finalY || 40) + 15;
+    if (y > pageH - 55) {
+      doc.addPage();
+      y = 25;
+    }
+    const x = pageW - 80;
+    doc.setFontSize(11);
+    doc.text(`Batam, ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, x, y);
+    doc.text('Koordinator PBL,', x, y + 6);
+    doc.text('(....................................)', x, y + 34);
+  };
+
+  const handleExportJadwalPDF = () => {
+    const rows = schedules
+      .slice()
+      .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+      .map((sch, i) => {
+        const group = groups.find(g => g.id === sch.group_id);
+        const report = findReport(sch.group_id);
+        return [
+          String(i + 1),
+          group?.group_name || sch.group_id,
+          group?.prodi || '-',
+          report?.report_title || '-',
+          new Date(sch.date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+          sch.time,
+          sch.room,
+          dosenPenguji.find(d => d.id === sch.penguji_id)?.name || sch.penguji_id,
+        ];
+      });
+
+    if (rows.length === 0) {
+      toast.error('Belum ada jadwal ujian untuk diunduh.');
+      return;
+    }
+
+    const doc = new jsPDF({ orientation: 'landscape' });
+    addPdfHeader(doc, 'JADWAL UJIAN PBL');
+    autoTable(doc, {
+      startY: 38,
+      head: [['No', 'Kelompok', 'Prodi', 'Judul Laporan', 'Hari/Tanggal', 'Waktu', 'Ruangan', 'Dosen Penguji']],
+      body: rows,
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [15, 118, 110] },
+    });
+    addSignatureBlock(doc);
+    doc.save(`Jadwal_Ujian_PBL_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
+  const handleExportRevisiPDF = () => {
+    // Semua kelompok yang sudah terjadwal ujian ikut dicetak, termasuk yang
+    // belum mengunggah revisi — berguna sebagai form monitoring.
+    const scheduledGroups = groups.filter(g => schedules.some(sch => sch.group_id === g.id));
+    if (scheduledGroups.length === 0) {
+      toast.error('Belum ada kelompok terjadwal ujian untuk diunduh.');
+      return;
+    }
+
+    const rows = scheduledGroups.map((g, i) => {
+      const report = findReport(g.id);
+      const hasRevisi = !!report?.custom_revisi_urls;
+      return [
+        String(i + 1),
+        g.group_name,
+        g.prodi || '-',
+        hasRevisi ? (report?.revisi_status || 'Pending') : 'Belum Unggah',
+        report?.revisi_submitted_at ? new Date(report.revisi_submitted_at).toLocaleDateString('id-ID') : '-',
+        hasRevisi ? Object.keys(report!.custom_revisi_urls).join(', ') : '-',
+      ];
+    });
+
+    const doc = new jsPDF();
+    addPdfHeader(doc, 'REKAP REVISI PASCA-UJIAN PBL');
+    autoTable(doc, {
+      startY: 38,
+      head: [['No', 'Kelompok', 'Prodi', 'Status Revisi', 'Tgl Pengumpulan', 'Berkas']],
+      body: rows,
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [15, 118, 110] },
+    });
+    addSignatureBlock(doc);
+    doc.save(`Rekap_Revisi_PBL_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
   // Field `status` dipakai dua tahap (bimbingan dosen & verifikasi admin),
   // jadi tahap sebenarnya diturunkan dari kombinasi status + approval_url:
   // approval_url baru terisi setelah mahasiswa mengunggah berkas syarat ujian.
@@ -326,8 +428,15 @@ export const ManajemenUjian = () => {
         <TabsContent value="jadwal">
           <Card>
             <CardHeader>
-              <CardTitle>Daftar Kelompok & Eligibilitas Ujian</CardTitle>
-              <CardDescription>Persetujuan Dosen Pembimbing hanya menyelesaikan tahap bimbingan. Kelompok baru dapat dijadwalkan setelah mahasiswa mengunggah berkas syarat ujian dan Admin memvalidasinya ("Setujui Syarat Admin"). Admin dapat mengembalikan berkas (Tidak MS) jika kewajiban administratif belum terpenuhi.</CardDescription>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-[16rem]">
+                  <CardTitle>Daftar Kelompok & Eligibilitas Ujian</CardTitle>
+                  <CardDescription className="mt-1">Persetujuan Dosen Pembimbing hanya menyelesaikan tahap bimbingan. Kelompok baru dapat dijadwalkan setelah mahasiswa mengunggah berkas syarat ujian dan Admin memvalidasinya ("Setujui Syarat Admin"). Admin dapat mengembalikan berkas (Tidak MS) jika kewajiban administratif belum terpenuhi.</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleExportJadwalPDF}>
+                  <Download className="w-4 h-4 mr-2" /> Unduh PDF Jadwal
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
@@ -461,8 +570,15 @@ export const ManajemenUjian = () => {
         <TabsContent value="revisi">
           <Card>
             <CardHeader>
-              <CardTitle>Validasi Revisi Pasca-Ujian</CardTitle>
-              <CardDescription>Tinjau dokumen syarat revisi yang diunggah oleh kelompok pasca-ujian.</CardDescription>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-[16rem]">
+                  <CardTitle>Validasi Revisi Pasca-Ujian</CardTitle>
+                  <CardDescription className="mt-1">Tinjau dokumen syarat revisi yang diunggah oleh kelompok pasca-ujian.</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleExportRevisiPDF}>
+                  <Download className="w-4 h-4 mr-2" /> Unduh PDF Rekap
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
