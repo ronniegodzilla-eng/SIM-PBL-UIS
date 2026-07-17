@@ -16,7 +16,6 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
   const [exam, setExam] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [drafFile, setDrafFile] = useState<File | null>(null);
-  const [persetujuanFile, setPersetujuanFile] = useState<File | null>(null);
   const [reportTitle, setReportTitle] = useState('');
   
   const [settings, setSettings] = useState<{ exam: string[], revisi: string[] }>({ exam: [], revisi: [] });
@@ -70,8 +69,8 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
     const dedupeReqs = (arr: any[]) => {
       const out: string[] = [];
       for (const v of arr || []) {
-        const str = String(v);
-        if (!out.some(x => x.trim() === str.trim())) out.push(str);
+        const t = String(v).trim();
+        if (t && !out.includes(t)) out.push(t);
       }
       return out;
     };
@@ -97,7 +96,7 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
 
   const handleUploadFiles = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!persetujuanFile || !groupMember || groupMember.group_id === 'pending' || !report) return;
+    if (!groupMember || groupMember.group_id === 'pending' || !report) return;
 
     if (!isRegistrationOpen(regSettings)) {
       toast.error('Pendaftaran ujian sedang ditutup.');
@@ -113,7 +112,6 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
 
     try {
       setLoading(true);
-      const persetujuanUrl = await uploadToGoogleDrive(persetujuanFile, `${groupMember.group_id}_persetujuan`);
 
       const customUrls: { [key: string]: string } = {};
       for (const req of settings.exam) {
@@ -123,14 +121,15 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
          }
       }
 
+      // registered_at menjadi penanda pengajuan pendaftaran (menggantikan
+      // approval_url dari field bawaan Lembar Persetujuan yang dihapus).
       await setDoc(doc(db, 'pbl_reports', report.id), {
-        approval_url: persetujuanUrl,
         custom_exam_urls: customUrls,
+        registered_at: new Date().toISOString(),
         status: 'Pending'
       }, { merge: true });
 
       toast.success('Pendaftaran Ujian berhasil diajukan!');
-      setPersetujuanFile(null);
       setExamFiles({});
     } catch (error: any) {
       if (error.message && (error.message.includes('Google Apps Script') || error.message.includes('DriveApp'))) {
@@ -208,7 +207,10 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
     return <div className="text-center py-8 text-slate-500">Anda belum tergabung dalam kelompok PBL.</div>;
   }
 
-  const isBimbinganFinished = report && (report.status === 'Approved' || report.status === 'Pending' || report.approval_url);
+  // Penanda "sudah mengajukan pendaftaran": registered_at (baru) atau
+  // approval_url (data lama, dari field bawaan yang sudah dihapus).
+  const isRegistered = !!(report?.registered_at || report?.approval_url);
+  const isBimbinganFinished = report && (report.status === 'Approved' || report.status === 'Pending' || isRegistered);
   const isLeader = groupInfo?.leader_id === profile?.uid;
   const registrationOpen = isRegistrationOpen(regSettings, now);
 
@@ -249,10 +251,6 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
               Form pendaftaran dibekukan. Anda harus menyelesaikan Proses Bimbingan Laporan hingga disetujui Dosen Pembimbing terlebih dahulu.
             </div>
             <form className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label>Lembar Persetujuan (PDF) — Bawaan Sistem *</Label>
-                <Input type="file" accept=".pdf" disabled />
-              </div>
               {settings.exam.map(req => (
                 <div key={req} className="space-y-2">
                   <Label>{req} *</Label>
@@ -269,35 +267,41 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
             <p className="text-emerald-700 font-medium">Pendaftaran berhasil diajukan.</p>
             <p className="text-sm text-slate-500">Sedang menunggu persetujuan dari Admin Prodi / Akademik.</p>
           </div>
-        ) : (report.status === 'Approved' && !report.approval_url) || (report.status === 'Revisi' && report.approval_url) ? (
+        ) : (report.status === 'Approved' && !isRegistered) || (report.status === 'Revisi' && isRegistered) ? (
           <form onSubmit={handleUploadFiles} className="space-y-4 pt-2">
-            {report.status === 'Revisi' && report.approval_url ? (
+            {report.status === 'Revisi' && isRegistered ? (
               <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-md mb-4 text-sm font-medium">
                 Pendaftaran Ujian Anda dikembalikan oleh Admin (Tidak Memenuhi Syarat). Silakan unggah ulang.
               </div>
             ) : (
               <p className="text-sm text-slate-600 mb-4">
-                Draf laporan Anda telah disetujui. Silakan unggah Lembar Persetujuan yang telah ditandatangani beserta dokumen kelengkapan ujian lainnya.
+                Draf laporan Anda telah disetujui. Silakan unggah dokumen kelengkapan ujian berikut.
               </p>
             )}
-            <div className="space-y-2">
-              <Label>Lembar Persetujuan (PDF) — Bawaan Sistem *</Label>
-              <Input type="file" accept=".pdf" onChange={(e) => setPersetujuanFile(e.target.files?.[0] || null)} required disabled={!isLeader || !registrationOpen} />
-            </div>
+            {settings.exam.length === 0 && (
+              <p className="text-sm text-slate-500">Tidak ada dokumen yang diminta. Klik tombol di bawah untuk mengajukan pendaftaran.</p>
+            )}
             {settings.exam.map(req => (
               <div key={req} className="space-y-2">
                 <Label>{req} *</Label>
                 <Input type="file" onChange={(e) => setExamFiles(prev => ({ ...prev, [req]: e.target.files?.[0] || null }))} required disabled={!isLeader || !registrationOpen} />
               </div>
             ))}
-            <Button type="submit" disabled={loading || !persetujuanFile || !isLeader || !registrationOpen}>
+            <Button type="submit" disabled={loading || !isLeader || !registrationOpen}>
               {loading ? 'Mengajukan...' : 'Ajukan Pendaftaran Ujian'}
             </Button>
           </form>
         ) : (
-           <div className="flex items-center gap-2">
-              <Badge variant="default">Pendaftaran Ujian Disetujui</Badge>
-              <a href={report.approval_url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline">Lihat Lembar Persetujuan</a>
+           <div className="flex flex-col gap-2">
+              <div><Badge variant="default">Pendaftaran Ujian Disetujui</Badge></div>
+              <div className="flex flex-col gap-1 text-sm">
+                {report.approval_url && (
+                  <a href={report.approval_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Lihat Lembar Persetujuan</a>
+                )}
+                {report.custom_exam_urls && Object.entries(report.custom_exam_urls).map(([key, url]) => (
+                  <a key={key} href={url as string} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Lihat {key}</a>
+                ))}
+              </div>
            </div>
         )}
       </div>

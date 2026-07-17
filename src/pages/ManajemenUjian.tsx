@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs } from 'firebase/firestore';
+import { ArrowUp, ArrowDown, Pencil } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -21,6 +22,7 @@ export const ManajemenUjian = () => {
   const [settings, setSettings] = useState<{ exam: string[], revisi: string[] }>({ exam: [], revisi: [] });
   const [examReqInput, setExamReqInput] = useState('');
   const [revisiReqInput, setRevisiReqInput] = useState('');
+  const [editReq, setEditReq] = useState<{ type: 'exam' | 'revisi'; index: number; value: string } | null>(null);
   
   // Pengaturan deadline pendaftaran ujian
   const [regSettings, setRegSettings] = useState<ExamRegistrationSettings | null>(null);
@@ -77,8 +79,8 @@ export const ManajemenUjian = () => {
     const dedupeReqs = (arr: any[]) => {
       const out: string[] = [];
       for (const v of arr || []) {
-        const str = String(v);
-        if (!out.some(x => x.trim() === str.trim())) out.push(str);
+        const t = String(v).trim();
+        if (t && !out.includes(t)) out.push(t);
       }
       return out;
     };
@@ -197,46 +199,73 @@ export const ManajemenUjian = () => {
     }
   };
 
-  const handleAddRequirement = async (type: 'exam' | 'revisi') => {
-    const val = type === 'exam' ? examReqInput : revisiReqInput;
-    if (!val.trim()) return;
-
+  // Baca daftar mentah dari server, normalisasi (trim + dedupe), terapkan
+  // mutasi, lalu tulis kembali utuh. Dipakai untuk tambah/hapus/edit/urut.
+  // Mutator boleh mengembalikan null untuk membatalkan (mis. nama duplikat).
+  const mutateRequirements = async (
+    type: 'exam' | 'revisi',
+    mutate: (arr: string[]) => string[] | null,
+    successMsg: string
+  ) => {
     try {
-      // arrayUnion menghindari read-modify-write: dua admin yang menambah
-      // bersamaan tidak akan saling menimpa daftar syarat.
-      await setDoc(doc(db, 'settings', 'requirements'), {
-        [type]: arrayUnion(val.trim())
-      }, { merge: true });
-      if (type === 'exam') setExamReqInput('');
-      else setRevisiReqInput('');
-      toast.success('Syarat berhasil ditambahkan');
+      const snap = await getDoc(doc(db, 'settings', 'requirements'));
+      const raw: any[] = (snap.exists() ? snap.data()[type] : []) || [];
+      const normalized: string[] = [];
+      for (const v of raw) {
+        const t = String(v).trim();
+        if (t && !normalized.includes(t)) normalized.push(t);
+      }
+      const next = mutate(normalized);
+      if (next === null) return;
+      await setDoc(doc(db, 'settings', 'requirements'), { [type]: next }, { merge: true });
+      toast.success(successMsg);
     } catch (error: any) {
       console.error(error);
       toast.error(`Gagal menyimpan syarat: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 10000 });
     }
   };
 
-  const handleRemoveRequirement = async (type: 'exam' | 'revisi', index: number) => {
-    try {
-      const target = settings[type][index];
-      // Baca array mentah dari server: bisa berisi varian kembar yang hanya
-      // beda spasi (data lama). Hapus semuanya sekaligus agar tidak ada sisa
-      // yang tetap tampil di sisi mahasiswa.
-      const snap = await getDoc(doc(db, 'settings', 'requirements'));
-      const rawArr: any[] = (snap.exists() ? snap.data()[type] : []) || [];
-      const targets = rawArr.filter(v => String(v).trim() === target.trim());
-      if (targets.length === 0) {
-        toast.success('Syarat sudah tidak ada di server.');
-        return;
+  const handleAddRequirement = async (type: 'exam' | 'revisi') => {
+    const val = (type === 'exam' ? examReqInput : revisiReqInput).trim();
+    if (!val) return;
+    await mutateRequirements(type, arr => {
+      if (arr.includes(val)) {
+        toast.error('Syarat dengan nama itu sudah ada.');
+        return null;
       }
-      await setDoc(doc(db, 'settings', 'requirements'), {
-        [type]: arrayRemove(...targets)
-      }, { merge: true });
-      toast.success('Syarat berhasil dihapus');
-    } catch (error: any) {
-      console.error(error);
-      toast.error(`Gagal menghapus syarat: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 10000 });
+      return [...arr, val];
+    }, 'Syarat berhasil ditambahkan');
+    if (type === 'exam') setExamReqInput('');
+    else setRevisiReqInput('');
+  };
+
+  const handleRemoveRequirement = (type: 'exam' | 'revisi', index: number) =>
+    mutateRequirements(type, arr => arr.filter((_, i) => i !== index), 'Syarat berhasil dihapus');
+
+  const handleMoveRequirement = (type: 'exam' | 'revisi', index: number, dir: -1 | 1) =>
+    mutateRequirements(type, arr => {
+      const j = index + dir;
+      if (j < 0 || j >= arr.length) return null;
+      const next = [...arr];
+      [next[index], next[j]] = [next[j], next[index]];
+      return next;
+    }, 'Urutan syarat diperbarui');
+
+  const handleEditRequirement = (type: 'exam' | 'revisi', index: number, newVal: string) => {
+    const val = newVal.trim();
+    if (!val) {
+      toast.error('Nama syarat tidak boleh kosong.');
+      return Promise.resolve();
     }
+    return mutateRequirements(type, arr => {
+      if (arr.some((x, i) => i !== index && x === val)) {
+        toast.error('Syarat dengan nama itu sudah ada.');
+        return null;
+      }
+      const next = [...arr];
+      next[index] = val;
+      return next;
+    }, 'Syarat berhasil diubah');
   };
 
   // Pilih dokumen report kanonik (report_<group_id>) agar berkas yang diunggah
@@ -252,9 +281,12 @@ export const ManajemenUjian = () => {
   // approval_url baru terisi setelah mahasiswa mengunggah berkas syarat ujian.
   type ReportStage = 'Bimbingan' | 'MenungguBerkas' | 'MenungguValidasi' | 'DikembalikanAdmin' | 'Tervalidasi';
   const getReportStage = (report: any): ReportStage => {
+    // registered_at = penanda baru; approval_url = data lama (field bawaan
+    // Lembar Persetujuan yang sudah dihapus dari form).
+    const registered = !!(report.registered_at || report.approval_url);
     if (report.status === 'Pending') return 'MenungguValidasi';
-    if (report.status === 'Approved') return report.approval_url ? 'Tervalidasi' : 'MenungguBerkas';
-    if (report.status === 'Revisi') return report.approval_url ? 'DikembalikanAdmin' : 'Bimbingan';
+    if (report.status === 'Approved') return registered ? 'Tervalidasi' : 'MenungguBerkas';
+    if (report.status === 'Revisi') return registered ? 'DikembalikanAdmin' : 'Bimbingan';
     return 'Bimbingan';
   };
 
@@ -357,10 +389,8 @@ export const ManajemenUjian = () => {
                               ) : (
                                 <span className="text-slate-400 italic">Draf Laporan: belum diunggah</span>
                               )}
-                              {report.approval_url ? (
+                              {report.approval_url && (
                                 <a href={report.approval_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Lembar Persetujuan</a>
-                              ) : (
-                                <span className="text-slate-400 italic">Lembar Persetujuan: belum diunggah</span>
                               )}
                               {settings.exam.map((req) => (
                                 report.custom_exam_urls?.[req] ? (
@@ -565,7 +595,7 @@ export const ManajemenUjian = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Syarat Pendaftaran Ujian</CardTitle>
-                <CardDescription>"Lembar Persetujuan (PDF)" adalah syarat bawaan sistem dan selalu diminta saat pendaftaran ujian. Tambahkan dokumen lain di sini — tidak perlu menambahkan Lembar Persetujuan lagi.</CardDescription>
+                <CardDescription>Dokumen yang wajib diunggah mahasiswa saat pendaftaran ujian. Urutan di daftar ini sama dengan urutan tampil pada form mahasiswa.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
@@ -573,19 +603,30 @@ export const ManajemenUjian = () => {
                   <Button onClick={() => handleAddRequirement('exam')}>Tambah</Button>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {/* Syarat bawaan sistem — selalu tampil di form mahasiswa,
-                      tidak bisa dihapus karena menjadi penanda pengajuan. */}
-                  <div className="flex items-center justify-between bg-slate-100 p-2 rounded border text-sm">
-                    <span>Lembar Persetujuan (PDF)</span>
-                    <Badge variant="secondary" className="text-[10px]">Bawaan Sistem</Badge>
-                  </div>
                   {settings.exam.length === 0 ? (
-                    <div className="text-sm text-slate-500 py-1">Belum ada syarat tambahan.</div>
+                    <div className="text-sm text-slate-500 py-1">Belum ada syarat — mahasiswa dapat mengajukan pendaftaran tanpa unggahan.</div>
                   ) : (
                     settings.exam.map((req, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded border text-sm">
-                        <span>{req}</span>
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-red-500" onClick={() => handleRemoveRequirement('exam', idx)}>Hapus</Button>
+                      <div key={idx} className="flex items-center justify-between gap-2 bg-slate-50 p-2 rounded border text-sm">
+                        {editReq && editReq.type === 'exam' && editReq.index === idx ? (
+                          <>
+                            <Input value={editReq.value} onChange={e => setEditReq({ ...editReq, value: e.target.value })} className="h-7 text-sm" autoFocus />
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button size="sm" className="h-6 px-2 text-[11px]" onClick={async () => { await handleEditRequirement('exam', idx, editReq.value); setEditReq(null); }}>Simpan</Button>
+                              <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setEditReq(null)}>Batal</Button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="flex-1 break-words">{req}</span>
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={idx === 0} title="Naikkan urutan" onClick={() => handleMoveRequirement('exam', idx, -1)}><ArrowUp className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={idx === settings.exam.length - 1} title="Turunkan urutan" onClick={() => handleMoveRequirement('exam', idx, 1)}><ArrowDown className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Edit nama" onClick={() => setEditReq({ type: 'exam', index: idx, value: req })}><Pencil className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-6 px-2 text-red-500" onClick={() => handleRemoveRequirement('exam', idx)}>Hapus</Button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))
                   )}
@@ -607,10 +648,27 @@ export const ManajemenUjian = () => {
                   <div className="text-sm text-slate-500 py-2">Belum ada syarat khusus yang diatur</div>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {settings.revisi.map((req, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded border text-sm">
-                        <span>{req}</span>
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-red-500" onClick={() => handleRemoveRequirement('revisi', idx)}>Hapus</Button>
+                    {                    settings.revisi.map((req, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-2 bg-slate-50 p-2 rounded border text-sm">
+                        {editReq && editReq.type === 'revisi' && editReq.index === idx ? (
+                          <>
+                            <Input value={editReq.value} onChange={e => setEditReq({ ...editReq, value: e.target.value })} className="h-7 text-sm" autoFocus />
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button size="sm" className="h-6 px-2 text-[11px]" onClick={async () => { await handleEditRequirement('revisi', idx, editReq.value); setEditReq(null); }}>Simpan</Button>
+                              <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setEditReq(null)}>Batal</Button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="flex-1 break-words">{req}</span>
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={idx === 0} title="Naikkan urutan" onClick={() => handleMoveRequirement('revisi', idx, -1)}><ArrowUp className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={idx === settings.revisi.length - 1} title="Turunkan urutan" onClick={() => handleMoveRequirement('revisi', idx, 1)}><ArrowDown className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Edit nama" onClick={() => setEditReq({ type: 'revisi', index: idx, value: req })}><Pencil className="w-3.5 h-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="h-6 px-2 text-red-500" onClick={() => handleRemoveRequirement('revisi', idx)}>Hapus</Button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
