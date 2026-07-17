@@ -65,10 +65,20 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       }
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'exam_schedules'));
 
+    // Samakan dengan sisi admin: entri kembar yang hanya beda spasi
+    // (data lama) ditampilkan satu saja.
+    const dedupeReqs = (arr: any[]) => {
+      const out: string[] = [];
+      for (const v of arr || []) {
+        const str = String(v);
+        if (!out.some(x => x.trim() === str.trim())) out.push(str);
+      }
+      return out;
+    };
     const unsubSettings = onSnapshot(doc(db, 'settings', 'requirements'), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
-        setSettings({ exam: data.exam || [], revisi: data.revisi || [] });
+        setSettings({ exam: dedupeReqs(data.exam), revisi: dedupeReqs(data.revisi) });
       }
     });
 
