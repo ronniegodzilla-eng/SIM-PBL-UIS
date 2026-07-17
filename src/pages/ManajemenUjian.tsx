@@ -11,6 +11,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { ExamRegistrationSettings, isRegistrationOpen, formatDeadline, timestampToLocalInput, localInputToTimestamp } from '../lib/examRegistration';
 
 export const ManajemenUjian = () => {
   const [reports, setReports] = useState<any[]>([]);
@@ -21,6 +22,14 @@ export const ManajemenUjian = () => {
   const [examReqInput, setExamReqInput] = useState('');
   const [revisiReqInput, setRevisiReqInput] = useState('');
   
+  // Pengaturan deadline pendaftaran ujian
+  const [regSettings, setRegSettings] = useState<ExamRegistrationSettings | null>(null);
+  const [regMode, setRegMode] = useState<'auto' | 'open' | 'closed'>('auto');
+  const [regOpenAt, setRegOpenAt] = useState('');
+  const [regCloseAt, setRegCloseAt] = useState('');
+  const [regNote, setRegNote] = useState('');
+  const [savingReg, setSavingReg] = useState(false);
+
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [newSchedule, setNewSchedule] = useState({ date: '', time: '', room: '', penguji_id: '' });
@@ -71,12 +80,23 @@ export const ManajemenUjian = () => {
       }
     });
 
+    // Fetch pengaturan deadline pendaftaran ujian
+    const unsubReg = onSnapshot(doc(db, 'settings', 'exam_registration'), (snap) => {
+      const data = snap.exists() ? (snap.data() as ExamRegistrationSettings) : null;
+      setRegSettings(data);
+      setRegMode(data?.mode || 'auto');
+      setRegOpenAt(timestampToLocalInput(data?.open_at));
+      setRegCloseAt(timestampToLocalInput(data?.close_at));
+      setRegNote(data?.note || '');
+    });
+
     return () => {
       unsubGroups();
       unsubReports();
       unsubSchedules();
       unsubPenguji();
       unsubSettings();
+      unsubReg();
     };
   }, []);
 
@@ -148,6 +168,23 @@ export const ManajemenUjian = () => {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'exam_schedules');
       toast.error('Gagal menyimpan jadwal ujian.');
+    }
+  };
+
+  const handleSaveRegSettings = async () => {
+    try {
+      setSavingReg(true);
+      await setDoc(doc(db, 'settings', 'exam_registration'), {
+        mode: regMode,
+        open_at: localInputToTimestamp(regOpenAt),
+        close_at: localInputToTimestamp(regCloseAt),
+        note: regNote.trim()
+      }, { merge: true });
+      toast.success('Pengaturan deadline pendaftaran disimpan');
+    } catch (error) {
+      toast.error('Gagal menyimpan pengaturan deadline');
+    } finally {
+      setSavingReg(false);
     }
   };
 
@@ -442,6 +479,66 @@ export const ManajemenUjian = () => {
         </TabsContent>
 
         <TabsContent value="pengaturan">
+          <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <CardTitle>Deadline Pendaftaran Ujian</CardTitle>
+                  <CardDescription className="mt-1">
+                    Atur kapan mahasiswa dapat mengajukan pendaftaran ujian (termasuk unggah ulang setelah dikembalikan).
+                  </CardDescription>
+                </div>
+                <Badge variant={isRegistrationOpen(regSettings) ? 'default' : 'destructive'} className="text-sm px-3 py-1">
+                  {isRegistrationOpen(regSettings) ? 'PENDAFTARAN DIBUKA' : 'PENDAFTARAN DITUTUP'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Mode</Label>
+                  <Select value={regMode} onValueChange={(val: any) => setRegMode(val)}>
+                    <SelectTrigger>
+                      <SelectValue>
+                        {regMode === 'auto' ? 'Ikuti Jadwal' : regMode === 'open' ? 'Buka Manual' : 'Tutup Manual'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Ikuti Jadwal</SelectItem>
+                      <SelectItem value="open">Buka Manual (abaikan jadwal)</SelectItem>
+                      <SelectItem value="closed">Tutup Manual (abaikan jadwal)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Dibuka Sejak (opsional)</Label>
+                  <Input type="datetime-local" value={regOpenAt} onChange={e => setRegOpenAt(e.target.value)} disabled={regMode !== 'auto'} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Deadline (Ditutup Pada)</Label>
+                  <Input type="datetime-local" value={regCloseAt} onChange={e => setRegCloseAt(e.target.value)} disabled={regMode !== 'auto'} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Catatan untuk Mahasiswa (opsional)</Label>
+                <Input placeholder="Contoh: Pendaftaran diperpanjang hingga 20 Juli 2026" value={regNote} onChange={e => setRegNote(e.target.value)} />
+              </div>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <p className="text-xs text-slate-500">
+                  {regMode === 'auto'
+                    ? (regCloseAt || regOpenAt
+                        ? `Mengikuti jadwal${regSettings?.open_at ? ` — dibuka ${formatDeadline(regSettings.open_at)}` : ''}${regSettings?.close_at ? ` — ditutup ${formatDeadline(regSettings.close_at)}` : ''}`
+                        : 'Belum ada jadwal — pendaftaran dianggap terbuka.')
+                    : regMode === 'open' ? 'Pendaftaran dipaksa TERBUKA, jadwal diabaikan.' : 'Pendaftaran dipaksa TERTUTUP, jadwal diabaikan.'}
+                </p>
+                <Button onClick={handleSaveRegSettings} disabled={savingReg}>
+                  {savingReg ? 'Menyimpan...' : 'Simpan Pengaturan'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
@@ -492,6 +589,7 @@ export const ManajemenUjian = () => {
                 )}
               </CardContent>
             </Card>
+          </div>
           </div>
         </TabsContent>
       </Tabs>

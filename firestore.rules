@@ -328,17 +328,47 @@ service cloud.firestore {
               get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.pmb_lapangan_id == request.auth.uid);
     }
 
+    // Deadline pendaftaran ujian (settings/exam_registration):
+    // mode 'open' = paksa buka, 'closed' = paksa tutup,
+    // 'auto' = ikuti jadwal open_at..close_at (Timestamp).
+    // Dokumen belum ada = terbuka (kompatibel dengan perilaku lama).
+    function examRegSettings() {
+      return get(/databases/$(database)/documents/settings/exam_registration).data;
+    }
+    function examRegistrationOpen() {
+      return !exists(/databases/$(database)/documents/settings/exam_registration) ||
+        examRegSettings().mode == 'open' ||
+        (examRegSettings().mode == 'auto' &&
+          (!('open_at' in examRegSettings()) || examRegSettings().open_at == null || request.time >= examRegSettings().open_at) &&
+          (!('close_at' in examRegSettings()) || examRegSettings().close_at == null || request.time < examRegSettings().close_at));
+    }
+
     match /pbl_reports/{reportId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidPBLReport(request.resource.data) && (
         isAnyAdmin() ||
-        (isMahasiswa() && request.resource.data.status in ['Draft', 'Pending'] && isLeaderOfGroup(request.resource.data.group_id))
+        (isMahasiswa() && isLeaderOfGroup(request.resource.data.group_id) &&
+          (request.resource.data.status == 'Draft' ||
+           (request.resource.data.status == 'Pending' && examRegistrationOpen())))
       );
       allow update: if isAuthenticated() && isValidPBLReport(request.resource.data)
         && request.resource.data.group_id == resource.data.group_id && (
         isAnyAdmin() ||
         (isDosenPembimbing() && isSupervisorOfGroup(resource.data.group_id)) ||
-        (isMahasiswa() && isLeaderOfGroup(resource.data.group_id) && (resource.data.status != 'Approved' || (request.resource.data.status == 'Pending' && request.resource.data.approval_url != '')) && resource.data.revisi_status != 'Approved')
+        (isMahasiswa() && isLeaderOfGroup(resource.data.group_id) && resource.data.revisi_status != 'Approved' && (
+          // Proses bimbingan: unggah/perbarui draf sebelum disetujui dosen.
+          (request.resource.data.status == 'Draft' && resource.data.status != 'Approved') ||
+          // Pengajuan pendaftaran ujian — termasuk unggah ulang setelah
+          // dikembalikan admin (Tidak MS) — hanya saat pendaftaran dibuka.
+          (request.resource.data.status == 'Pending' &&
+            'approval_url' in request.resource.data && request.resource.data.approval_url != '' &&
+            examRegistrationOpen()) ||
+          // Unggah revisi pasca-ujian: fase berbeda, tidak digerbang deadline
+          // pendaftaran. (Sekaligus memperbaiki bug lama: transisi ini
+          // sebelumnya tertolak karena status dokumen masih 'Approved'.)
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['custom_revisi_urls', 'revisi_status', 'revisi_submitted_at']) &&
+            request.resource.data.revisi_status == 'Pending')
+        ))
       );
       allow delete: if isAnyAdmin();
     }

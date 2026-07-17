@@ -8,6 +8,7 @@ import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { Badge } from '../ui/badge';
 import { uploadToGoogleDrive } from '../../lib/uploadFile';
+import { ExamRegistrationSettings, isRegistrationOpen, formatDeadline } from '../../lib/examRegistration';
 
 export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
   const { profile } = useAuth();
@@ -22,6 +23,15 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
   const [examFiles, setExamFiles] = useState<{ [key: string]: File | null }>({});
   const [revisiFiles, setRevisiFiles] = useState<{ [key: string]: File | null }>({});
   const [groupInfo, setGroupInfo] = useState<any>(null);
+  const [regSettings, setRegSettings] = useState<ExamRegistrationSettings | null>(null);
+  const [now, setNow] = useState(new Date());
+
+  // Evaluasi ulang status buka/tutup tiap 30 detik agar deadline yang lewat
+  // saat halaman terbuka langsung terasa tanpa refresh.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!profile || !groupMember || groupMember.group_id === 'pending') return;
@@ -62,17 +72,27 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       }
     });
 
+    const unsubReg = onSnapshot(doc(db, 'settings', 'exam_registration'), (snap) => {
+      setRegSettings(snap.exists() ? (snap.data() as ExamRegistrationSettings) : null);
+    });
+
     return () => {
       unsubGroup();
       unsubReport();
       unsubExam();
       unsubSettings();
+      unsubReg();
     };
   }, [profile, groupMember]);
 
   const handleUploadFiles = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!persetujuanFile || !groupMember || groupMember.group_id === 'pending' || !report) return;
+
+    if (!isRegistrationOpen(regSettings)) {
+      toast.error('Pendaftaran ujian sedang ditutup.');
+      return;
+    }
 
     for (const req of settings.exam) {
       if (!examFiles[req]) {
@@ -180,6 +200,7 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
 
   const isBimbinganFinished = report && (report.status === 'Approved' || report.status === 'Pending' || report.approval_url);
   const isLeader = groupInfo?.leader_id === profile?.uid;
+  const registrationOpen = isRegistrationOpen(regSettings, now);
 
   return (
     <div className="space-y-6">
@@ -189,6 +210,28 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
           <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-md text-sm">
             Mode Lihat Saja. Hanya <strong>Ketua Kelompok</strong> yang dapat mengajukan pendaftaran ujian dan mengunggah berkas.
           </div>
+        )}
+        {regSettings?.mode && (
+          registrationOpen ? (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-sm">
+              <strong>Pendaftaran ujian DIBUKA</strong>
+              {regSettings.mode === 'auto' && regSettings.close_at && (
+                <> — ditutup pada <strong>{formatDeadline(regSettings.close_at)}</strong></>
+              )}
+              {regSettings.note && <div className="mt-1 text-emerald-700">{regSettings.note}</div>}
+            </div>
+          ) : (
+            <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-md text-sm">
+              <strong>Pendaftaran ujian DITUTUP.</strong>
+              {regSettings.mode === 'auto' && regSettings.open_at && now.getTime() < regSettings.open_at.toDate().getTime() && (
+                <> Dibuka pada <strong>{formatDeadline(regSettings.open_at)}</strong>.</>
+              )}
+              {regSettings.mode === 'auto' && regSettings.close_at && now.getTime() >= regSettings.close_at.toDate().getTime() && (
+                <> Deadline berakhir <strong>{formatDeadline(regSettings.close_at)}</strong>.</>
+              )}
+              {regSettings.note && <div className="mt-1 text-red-700">{regSettings.note}</div>}
+            </div>
+          )
         )}
         {!isBimbinganFinished ? (
           <div className="opacity-60 pointer-events-none">
@@ -229,15 +272,15 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
             )}
             <div className="space-y-2">
               <Label>Lembar Persetujuan (PDF) *</Label>
-              <Input type="file" accept=".pdf" onChange={(e) => setPersetujuanFile(e.target.files?.[0] || null)} required disabled={!isLeader} />
+              <Input type="file" accept=".pdf" onChange={(e) => setPersetujuanFile(e.target.files?.[0] || null)} required disabled={!isLeader || !registrationOpen} />
             </div>
             {settings.exam.map(req => (
               <div key={req} className="space-y-2">
                 <Label>{req} *</Label>
-                <Input type="file" onChange={(e) => setExamFiles(prev => ({ ...prev, [req]: e.target.files?.[0] || null }))} required disabled={!isLeader} />
+                <Input type="file" onChange={(e) => setExamFiles(prev => ({ ...prev, [req]: e.target.files?.[0] || null }))} required disabled={!isLeader || !registrationOpen} />
               </div>
             ))}
-            <Button type="submit" disabled={loading || !persetujuanFile || !isLeader}>
+            <Button type="submit" disabled={loading || !persetujuanFile || !isLeader || !registrationOpen}>
               {loading ? 'Mengajukan...' : 'Ajukan Pendaftaran Ujian'}
             </Button>
           </form>
