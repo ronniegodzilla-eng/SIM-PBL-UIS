@@ -76,12 +76,13 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
       toast.success('Draf Laporan berhasil diunggah untuk bimbingan.');
       setDrafFile(null);
     } catch (error: any) {
+      console.error(error);
       if (error.message && (error.message.includes('Google Apps Script') || error.message.includes('DriveApp'))) {
-        toast.error(`Error Google Drive: ${error.message}.`);
+        toast.error(`Error Google Drive: ${error.message}.`, { duration: 12000 });
+      } else if (error.code === 'permission-denied') {
+        toast.error('Unggahan ditolak server (permission-denied). Kemungkinan aturan Firestore belum diperbarui atau Anda bukan ketua kelompok. Hubungi admin.', { duration: 15000 });
       } else {
-        console.error(error);
-        handleFirestoreError(error, OperationType.CREATE, 'pbl_reports');
-        toast.error('Gagal mengunggah draf.');
+        toast.error(`Gagal mengunggah draf: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 12000 });
       }
     } finally {
       setLoading(false);
