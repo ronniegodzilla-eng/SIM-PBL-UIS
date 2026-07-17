@@ -373,7 +373,9 @@ export const Landing = () => {
                           </h3>
                           <div className="text-sm text-slate-500 mt-1 space-y-1">
                             <div className="flex items-center gap-1.5 line-clamp-1"><Calendar className="w-3.5 h-3.5 text-teal-500"/> {exam.time}</div>
-                            <div className="flex items-center gap-1.5 line-clamp-1"><FileText className="w-3.5 h-3.5 text-amber-500"/> {exam.location || 'Menyusul'}</div>
+                            <div className="flex items-center gap-1.5 line-clamp-1"><Briefcase className="w-3.5 h-3.5 text-amber-500"/> Ruang {exam.room || 'Menyusul'}</div>
+                            <div className="flex items-center gap-1.5 line-clamp-1"><Users className="w-3.5 h-3.5 text-teal-500"/> Pembimbing: {users[groupTarget?.dsn_pembimbing_id]?.name || 'Menyusul'}</div>
+                            <div className="flex items-center gap-1.5 line-clamp-1"><FileText className="w-3.5 h-3.5 text-teal-500"/> Penguji: {users[exam.penguji_id]?.name || 'Menyusul'}</div>
                           </div>
                         </div>
                       </CardContent>
