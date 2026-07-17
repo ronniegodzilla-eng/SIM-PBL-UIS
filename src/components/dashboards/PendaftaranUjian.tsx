@@ -103,6 +103,17 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       return;
     }
 
+    // Preflight: aturan server hanya menerima pengajuan dari Ketua Kelompok.
+    // Tampilkan alasan yang jelas sebelum mencoba menulis.
+    if (!groupInfo?.leader_id) {
+      toast.error('Kelompok Anda belum memiliki Ketua Kelompok. Minta Dosen Pembimbing atau Admin menetapkan ketua terlebih dahulu.', { duration: 15000 });
+      return;
+    }
+    if (groupInfo.leader_id !== profile?.uid) {
+      toast.error('Hanya Ketua Kelompok yang dapat mengajukan pendaftaran ujian.', { duration: 12000 });
+      return;
+    }
+
     for (const req of settings.exam) {
       if (!examFiles[req]) {
         toast.error(`Mohon unggah dokumen: ${req}`);
@@ -123,10 +134,16 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
 
       // registered_at menjadi penanda pengajuan pendaftaran (menggantikan
       // approval_url dari field bawaan Lembar Persetujuan yang dihapus).
+      // report_url/createdAt disertakan ulang sebagai fallback: validator
+      // rules mewajibkan keduanya ada, dan dokumen lama/buatan manual bisa
+      // saja tidak memilikinya — tanpa ini seluruh pengajuan ditolak
+      // permission-denied.
       await setDoc(doc(db, 'pbl_reports', report.id), {
         custom_exam_urls: customUrls,
         registered_at: new Date().toISOString(),
-        status: 'Pending'
+        status: 'Pending',
+        report_url: report.report_url || '',
+        createdAt: report.createdAt || new Date().toISOString()
       }, { merge: true });
 
       toast.success('Pendaftaran Ujian berhasil diajukan!');
