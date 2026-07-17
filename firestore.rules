@@ -66,7 +66,8 @@ service cloud.firestore {
     }
 
     function isActiveUser() {
-      return isAuthenticated() && 
+      return isAuthenticated() &&
+             getUserData() != null &&
              getUserData().account_status == 'Active';
     }
 
@@ -308,7 +309,8 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['documentation_url']) && request.resource.data.documentation_url is string && request.resource.data.documentation_url != '';
       allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
         isAnyAdmin() ||
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid &&
+          (!('status' in resource.data) || request.resource.data.status == resource.data.status)) ||
         ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['Pending', 'Approved'])
       );
       allow delete: if isAnyAdmin();
@@ -324,12 +326,17 @@ service cloud.firestore {
     // or that group's supervising lecturer — not by every student/lecturer.
     function isLeaderOfGroup(groupId) {
       return exists(/databases/$(database)/documents/pbl_groups/$(groupId)) &&
+             'leader_id' in get(/databases/$(database)/documents/pbl_groups/$(groupId)).data &&
              get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.leader_id == request.auth.uid;
     }
     function isSupervisorOfGroup(groupId) {
       return exists(/databases/$(database)/documents/pbl_groups/$(groupId)) &&
-             (get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.dsn_pembimbing_id == request.auth.uid ||
-              get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.pmb_lapangan_id == request.auth.uid);
+             (
+               ('dsn_pembimbing_id' in get(/databases/$(database)/documents/pbl_groups/$(groupId)).data &&
+                get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.dsn_pembimbing_id == request.auth.uid) ||
+               ('pmb_lapangan_id' in get(/databases/$(database)/documents/pbl_groups/$(groupId)).data &&
+                get(/databases/$(database)/documents/pbl_groups/$(groupId)).data.pmb_lapangan_id == request.auth.uid)
+             );
     }
 
     // Deadline pendaftaran ujian (settings/exam_registration):
@@ -341,6 +348,7 @@ service cloud.firestore {
     }
     function examRegistrationOpen() {
       return !exists(/databases/$(database)/documents/settings/exam_registration) ||
+        !('mode' in examRegSettings()) ||
         examRegSettings().mode == 'open' ||
         (examRegSettings().mode == 'auto' &&
           (!('open_at' in examRegSettings()) || examRegSettings().open_at == null || request.time >= examRegSettings().open_at) &&
