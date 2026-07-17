@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDocs, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -72,11 +72,20 @@ export const ManajemenUjian = () => {
       setDosenPenguji(p);
     });
 
-    // Fetch Settings
+    // Fetch Settings. Data lama bisa berisi entri kembar yang hanya beda
+    // spasi (era sebelum trim) — tampilkan satu saja agar konsisten.
+    const dedupeReqs = (arr: any[]) => {
+      const out: string[] = [];
+      for (const v of arr || []) {
+        const str = String(v);
+        if (!out.some(x => x.trim() === str.trim())) out.push(str);
+      }
+      return out;
+    };
     const unsubSettings = onSnapshot(doc(db, 'settings', 'requirements'), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
-        setSettings({ exam: data.exam || [], revisi: data.revisi || [] });
+        setSettings({ exam: dedupeReqs(data.exam), revisi: dedupeReqs(data.revisi) });
       }
     });
 
@@ -201,19 +210,32 @@ export const ManajemenUjian = () => {
       if (type === 'exam') setExamReqInput('');
       else setRevisiReqInput('');
       toast.success('Syarat berhasil ditambahkan');
-    } catch (error) {
-      toast.error('Gagal menyimpan syarat');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Gagal menyimpan syarat: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 10000 });
     }
   };
 
   const handleRemoveRequirement = async (type: 'exam' | 'revisi', index: number) => {
     try {
+      const target = settings[type][index];
+      // Baca array mentah dari server: bisa berisi varian kembar yang hanya
+      // beda spasi (data lama). Hapus semuanya sekaligus agar tidak ada sisa
+      // yang tetap tampil di sisi mahasiswa.
+      const snap = await getDoc(doc(db, 'settings', 'requirements'));
+      const rawArr: any[] = (snap.exists() ? snap.data()[type] : []) || [];
+      const targets = rawArr.filter(v => String(v).trim() === target.trim());
+      if (targets.length === 0) {
+        toast.success('Syarat sudah tidak ada di server.');
+        return;
+      }
       await setDoc(doc(db, 'settings', 'requirements'), {
-        [type]: arrayRemove(settings[type][index])
+        [type]: arrayRemove(...targets)
       }, { merge: true });
       toast.success('Syarat berhasil dihapus');
-    } catch (error) {
-      toast.error('Gagal menghapus syarat');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Gagal menghapus syarat: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 10000 });
     }
   };
 
