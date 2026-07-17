@@ -132,12 +132,13 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       toast.success('Pendaftaran Ujian berhasil diajukan!');
       setExamFiles({});
     } catch (error: any) {
+      console.error(error);
       if (error.message && (error.message.includes('Google Apps Script') || error.message.includes('DriveApp'))) {
-        toast.error(`Error Google Drive: ${error.message}.`);
+        toast.error(`Error Google Drive: ${error.message}.`, { duration: 12000 });
+      } else if (error.code === 'permission-denied') {
+        toast.error('Pengajuan ditolak server (permission-denied). Kemungkinan aturan Firestore belum diperbarui, Anda bukan ketua kelompok, atau pendaftaran sedang ditutup. Hubungi admin.', { duration: 15000 });
       } else {
-        console.error(error);
-        handleFirestoreError(error, OperationType.UPDATE, 'pbl_reports');
-        toast.error('Gagal mengunggah berkas.');
+        toast.error(`Gagal mengajukan pendaftaran: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 12000 });
       }
     } finally {
       setLoading(false);
@@ -150,9 +151,9 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       setLoading(true);
       await setDoc(doc(db, 'pbl_reports', report.id), { status: 'Pending' }, { merge: true });
       toast.success('Pendaftaran Ujian berhasil diajukan!');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `pbl_reports/${report.id}`);
-      toast.error('Gagal mengajukan pendaftaran ujian.');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Gagal mengajukan pendaftaran ujian: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 12000 });
     } finally {
       setLoading(false);
     }
@@ -191,12 +192,13 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       toast.success('Berkas Revisi berhasil diunggah.');
       setRevisiFiles({});
     } catch (error: any) {
+      console.error(error);
       if (error.message && (error.message.includes('Google Apps Script') || error.message.includes('DriveApp') || error.message.includes('Google Drive'))) {
-        toast.error(`Error Google Drive: ${error.message}. Pastikan izin Google Apps Script sudah dikonfigurasi dengan benar.`);
+        toast.error(`Error Google Drive: ${error.message}. Pastikan izin Google Apps Script sudah dikonfigurasi dengan benar.`, { duration: 12000 });
+      } else if (error.code === 'permission-denied') {
+        toast.error('Unggahan revisi ditolak server (permission-denied). Kemungkinan aturan Firestore belum diperbarui atau Anda bukan ketua kelompok. Hubungi admin.', { duration: 15000 });
       } else {
-        console.error(error);
-        handleFirestoreError(error, OperationType.UPDATE, 'pbl_reports');
-        toast.error('Gagal mengunggah berkas revisi.');
+        toast.error(`Gagal mengunggah berkas revisi: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 12000 });
       }
     } finally {
       setLoading(false);
