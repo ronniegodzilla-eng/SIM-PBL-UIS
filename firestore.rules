@@ -156,6 +156,7 @@ service cloud.firestore {
              data.group_id is string &&
              data.report_url is string &&
              (!('approval_url' in data) || data.approval_url is string) &&
+             (!('registered_at' in data) || data.registered_at is string) &&
              data.status in ['Draft', 'Pending', 'Approved', 'Revisi'] &&
              (!('report_title' in data) || data.report_title is string) &&
              (!('feedback_url' in data) || data.feedback_url is string) &&
@@ -360,8 +361,10 @@ service cloud.firestore {
           (request.resource.data.status == 'Draft' && resource.data.status != 'Approved') ||
           // Pengajuan pendaftaran ujian — termasuk unggah ulang setelah
           // dikembalikan admin (Tidak MS) — hanya saat pendaftaran dibuka.
+          // Penanda pengajuan: registered_at (baru) atau approval_url (lama).
           (request.resource.data.status == 'Pending' &&
-            'approval_url' in request.resource.data && request.resource.data.approval_url != '' &&
+            (('registered_at' in request.resource.data && request.resource.data.registered_at != '') ||
+             ('approval_url' in request.resource.data && request.resource.data.approval_url != '')) &&
             examRegistrationOpen()) ||
           // Unggah revisi pasca-ujian: fase berbeda, tidak digerbang deadline
           // pendaftaran. (Sekaligus memperbaiki bug lama: transisi ini

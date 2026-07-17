@@ -93,6 +93,7 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
   }
 
   const isLeader = groupInfo?.leader_id === profile?.uid;
+  const isRegistered = !!(report?.registered_at || report?.approval_url);
 
   return (
     <div className="space-y-6 bg-white p-6 rounded-lg border">
@@ -141,7 +142,7 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
             )}
           </div>
 
-          {(report.status === 'Revisi' && !report.approval_url) || report.status === 'Draft' ? (
+          {(report.status === 'Revisi' && !isRegistered) || report.status === 'Draft' ? (
             <form onSubmit={handleUploadDraf} className="space-y-4 pt-6 border-t mt-6">
               <h4 className="font-medium">Unggah Revisi / Pembaruan Draf</h4>
               <div className="space-y-2">
@@ -158,7 +159,7 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
             </form>
           ) : null}
 
-          {(report.status === 'Approved' || report.status === 'Pending' || (report.status === 'Revisi' && report.approval_url)) && (
+          {(report.status === 'Approved' || report.status === 'Pending' || (report.status === 'Revisi' && isRegistered)) && (
             <div className="pt-4 border-t mt-4 text-emerald-700 bg-emerald-50 p-4 rounded border-emerald-200">
               <p className="font-semibold">Bimbingan Selesai / Laporan Disetujui!</p>
               <p className="text-sm mt-1">Proses Pendaftaran Ujian sedang berlangsung atau sudah selesai.</p>
