@@ -257,7 +257,10 @@ service cloud.firestore {
         // A supervisor may set the group leader only for a group they supervise.
         ((isDosenPembimbing() || isPembimbingLapangan())
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leader_id'])
-          && (resource.data.dsn_pembimbing_id == request.auth.uid || resource.data.pmb_lapangan_id == request.auth.uid))
+          && (
+            ('dsn_pembimbing_id' in resource.data && resource.data.dsn_pembimbing_id == request.auth.uid) ||
+            ('pmb_lapangan_id' in resource.data && resource.data.pmb_lapangan_id == request.auth.uid)
+          ))
       );
       allow delete: if isAnyAdmin();
     }
@@ -356,7 +359,8 @@ service cloud.firestore {
         && request.resource.data.group_id == resource.data.group_id && (
         isAnyAdmin() ||
         (isDosenPembimbing() && isSupervisorOfGroup(resource.data.group_id)) ||
-        (isMahasiswa() && isLeaderOfGroup(resource.data.group_id) && resource.data.revisi_status != 'Approved' && (
+        (isMahasiswa() && isLeaderOfGroup(resource.data.group_id) &&
+          (!('revisi_status' in resource.data) || resource.data.revisi_status != 'Approved') && (
           // Proses bimbingan: unggah/perbarui draf sebelum disetujui dosen.
           (request.resource.data.status == 'Draft' && resource.data.status != 'Approved') ||
           // Pengajuan pendaftaran ujian — termasuk unggah ulang setelah
