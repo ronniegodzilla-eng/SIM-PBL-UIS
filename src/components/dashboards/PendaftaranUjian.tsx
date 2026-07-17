@@ -250,7 +250,7 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
             </div>
             <form className="space-y-4 pt-2">
               <div className="space-y-2">
-                <Label>Lembar Persetujuan (PDF) *</Label>
+                <Label>Lembar Persetujuan (PDF) — Bawaan Sistem *</Label>
                 <Input type="file" accept=".pdf" disabled />
               </div>
               {settings.exam.map(req => (
@@ -281,7 +281,7 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
               </p>
             )}
             <div className="space-y-2">
-              <Label>Lembar Persetujuan (PDF) *</Label>
+              <Label>Lembar Persetujuan (PDF) — Bawaan Sistem *</Label>
               <Input type="file" accept=".pdf" onChange={(e) => setPersetujuanFile(e.target.files?.[0] || null)} required disabled={!isLeader || !registrationOpen} />
             </div>
             {settings.exam.map(req => (
