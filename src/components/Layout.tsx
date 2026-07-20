@@ -211,10 +211,14 @@ export const Layout = () => {
     navItems.push({ name: 'Berita Acara & Kehadiran', path: '/berita-acara', icon: Calendar });
     navItems.push({ name: 'Rekap Logbook', path: '/rekap-logbook', icon: FileText });
     navItems.push({ name: 'Bimbingan Laporan', path: '/bimbingan-laporan', icon: FileText });
+    navItems.push({ name: 'Rekap Nilai', path: '/rekap-nilai', icon: LayoutDashboard });
   }
 
   if (profile?.role === 'PembimbingLapangan' || (profile?.role === 'Dosen' && isPL)) {
     navItems.push({ name: 'Persetujuan Harian', path: '/persetujuan-absensi', icon: FileText });
+    if (!navItems.some(item => item.path === '/rekap-nilai')) {
+      navItems.push({ name: 'Rekap Nilai', path: '/rekap-nilai', icon: LayoutDashboard });
+    }
   }
 
   if (profile?.role === 'Mahasiswa') {

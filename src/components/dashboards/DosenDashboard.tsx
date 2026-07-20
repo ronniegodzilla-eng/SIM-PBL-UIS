@@ -24,6 +24,7 @@ export const DosenDashboard = ({ role }: { role: string }) => {
   const [openGuide, setOpenGuide] = useState(false);
   
   const [allMembers, setAllMembers] = useState<any[]>([]);
+  const [allGroups, setAllGroups] = useState<any[]>([]);
   const [allStudents, setAllStudents] = useState<any[]>([]);
 
   const navigate = useNavigate();
@@ -61,33 +62,33 @@ export const DosenDashboard = ({ role }: { role: string }) => {
       unsubs.push(uPl);
     }
 
-    if (role === 'DosenPenguji' || role === 'Dosen' || role === 'Penguji') {
-      const qExam1 = query(collection(db, 'exam_schedules'), where('penguji_id', '==', profile.uid));
-      const uExam1 = onSnapshot(qExam1, (snapshot) => {
-        setExamSchedules(prev => {
-          const map = new Map(prev.map(e => [e.id, e]));
-          snapshot.docs.forEach(doc => map.set(doc.id, { id: doc.id, ...doc.data() }));
-          return Array.from(map.values());
-        });
-      }, (error) => handleFirestoreError(error, OperationType.LIST, 'exam_schedules'));
-      unsubs.push(uExam1);
-
-      // Also if DPL it acts as pembimbing_id on exam_schedules, let's fetch those too
-      const qExam2 = query(collection(db, 'exam_schedules'), where('pembimbing_id', '==', profile.uid));
-      const uExam2 = onSnapshot(qExam2, (snapshot) => {
-         setExamSchedules(prev => {
-          const map = new Map(prev.map(e => [e.id, e]));
-          snapshot.docs.forEach(doc => map.set(doc.id, { id: doc.id, ...doc.data() }));
-          return Array.from(map.values());
-        });
-      });
-      unsubs.push(uExam2);
-    }
-
     return () => {
       unsubs.forEach(u => u());
     };
   }, [profile, role]);
+
+  // Jadwal ujian yang relevan: sebagai Dosen Penguji ATAU sebagai pembimbing
+  // (DPL/PL) dari kelompok yang dijadwalkan. Dokumen exam_schedules tidak
+  // punya field pembimbing_id — relasi pembimbing ada di dokumen kelompok,
+  // jadi jadwal kelompok bimbingan diturunkan dari dplGroups/plGroups.
+  useEffect(() => {
+    if (!profile) return;
+
+    const supervisedIds = new Set([...dplGroups, ...plGroups].map(g => g.id));
+    const unsubExam = onSnapshot(collection(db, 'exam_schedules'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach(d => {
+        const data: any = { id: d.id, ...d.data() };
+        if (data.penguji_id === profile.uid || supervisedIds.has(data.group_id)) {
+          list.push(data);
+        }
+      });
+      list.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      setExamSchedules(list);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'exam_schedules'));
+
+    return () => unsubExam();
+  }, [profile, dplGroups, plGroups]);
 
   useEffect(() => {
     const unsubStudents = onSnapshot(query(collection(db, 'users'), where('role', '==', 'Mahasiswa')), (snapshot) => {
@@ -96,9 +97,13 @@ export const DosenDashboard = ({ role }: { role: string }) => {
     const unsubMembers = onSnapshot(collection(db, 'group_members'), (snapshot) => {
        setAllMembers(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
     });
+    const unsubAllGroups = onSnapshot(collection(db, 'pbl_groups'), (snapshot) => {
+       setAllGroups(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
+    });
     return () => {
       unsubStudents();
       unsubMembers();
+      unsubAllGroups();
     }
   }, []);
 
@@ -364,23 +369,27 @@ export const DosenDashboard = ({ role }: { role: string }) => {
             ) : (
               <div className="flex flex-col gap-3">
                 {examSchedules.map(schedule => {
-                   let dateStr = "Belum Diatur";
-                   if (schedule.exam_date) {
-                      dateStr = new Date(schedule.exam_date).toLocaleDateString('id-ID', {
-                        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-                      });
-                   }
+                   const group = allGroups.find(g => g.id === schedule.group_id);
+                   const dateStr = schedule.date
+                     ? new Date(schedule.date).toLocaleDateString('id-ID', {
+                         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                       })
+                     : 'Belum Diatur';
+                   const asPenguji = schedule.penguji_id === profile?.uid;
                    return (
-                    <div key={schedule.id} className="border border-slate-100 bg-slate-50 rounded-lg p-4 flex items-center justify-between">
-                      <div>
-                        <h4 className="font-semibold text-sm mb-1">{dateStr}</h4>
+                    <div key={schedule.id} className="border border-slate-100 bg-slate-50 rounded-lg p-4 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <h4 className="font-semibold text-sm mb-1 truncate">{group?.group_name || schedule.group_id}</h4>
                         <div className="text-xs text-slate-500">
-                          {schedule.start_time && schedule.end_time ? `${schedule.start_time} - ${schedule.end_time}` : 'Waktu belum diatur'}
+                          {dateStr}{schedule.time ? ` • ${schedule.time}` : ''}
                         </div>
                       </div>
-                      <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800">
-                        {schedule.location || 'Lokasi TBA'}
-                      </Badge>
+                      <div className="text-right shrink-0 space-y-1">
+                        <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800">
+                          {schedule.room ? `Ruang ${schedule.room}` : 'Ruang TBA'}
+                        </Badge>
+                        <div className="text-[10px] text-slate-500">{asPenguji ? 'Sebagai Penguji' : 'Sebagai Pembimbing'}</div>
+                      </div>
                     </div>
                    );
                 })}
