@@ -158,7 +158,10 @@ export const RekapNilai = () => {
       const group = groups.find(g => g.id === member?.group_id);
       const sGrades = grades[student.id] || {};
       
-      const sosialisasiScore = sGrades['KehadiranSosialisasi'] || 0;
+      // Nilai kehadiran sosialisasi disimpan dengan category 'Sosialisasi'
+      // (lihat Penilaian.tsx). 'KehadiranSosialisasi' dipertahankan sebagai
+      // fallback untuk data lama.
+      const sosialisasiScore = sGrades['Sosialisasi'] ?? sGrades['KehadiranSosialisasi'] ?? 0;
       const plScore = sGrades['PembimbingLapangan'] || 0;
       const dpScore = sGrades['DosenPembimbing'] || 0;
       const pengujiScore = sGrades['DosenPenguji'] || 0;

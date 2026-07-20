@@ -193,9 +193,13 @@ export const Penilaian = () => {
 
       toast.success('Nilai berhasil disimpan');
       setSelectedStudent(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'grades');
-      toast.error('Gagal menyimpan nilai');
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === 'permission-denied') {
+        toast.error('Penyimpanan nilai ditolak server (permission-denied). Pastikan role Anda berhak menilai kategori ini.', { duration: 12000 });
+      } else {
+        toast.error(`Gagal menyimpan nilai: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 10000 });
+      }
     } finally {
       setLoading(false);
     }
@@ -216,9 +220,13 @@ export const Penilaian = () => {
         createdAt: new Date().toISOString()
       }, { merge: true });
       toast.success('Kehadiran Sosialisasi berhasil disimpan');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'grades');
-      toast.error('Gagal menyimpan kehadiran');
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === 'permission-denied') {
+        toast.error('Penyimpanan kehadiran ditolak server (permission-denied). Pastikan Anda login sebagai Admin.', { duration: 12000 });
+      } else {
+        toast.error(`Gagal menyimpan kehadiran: ${error.code || error.message || 'error tidak diketahui'}`, { duration: 10000 });
+      }
     }
   };
 
