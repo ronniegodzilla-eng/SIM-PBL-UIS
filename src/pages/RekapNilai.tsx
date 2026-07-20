@@ -111,7 +111,7 @@ export const RekapNilai = () => {
     };
   }, [profile]);
 
-  if (profile?.role !== 'Admin' && profile?.role !== 'AdminProdi' && profile?.role !== 'Dosen') {
+  if (profile?.role !== 'Admin' && profile?.role !== 'AdminProdi' && profile?.role !== 'Dosen' && profile?.role !== 'PembimbingLapangan') {
     return <div className="p-8 text-center">Akses Ditolak</div>;
   }
 
@@ -119,9 +119,11 @@ export const RekapNilai = () => {
 
   const filteredStudents = students.filter(student => {
     if (isAdmin) return true;
+    // Pembimbing (DPL maupun Pembimbing Lapangan) melihat mahasiswa dari
+    // kelompok yang dibimbingnya saja.
     const member = groupMembers.find(m => m.student_id === student.id);
     const group = groups.find(g => g.id === member?.group_id);
-    return group && group.dsn_pembimbing_id === profile.uid;
+    return group && (group.dsn_pembimbing_id === profile.uid || group.pmb_lapangan_id === profile.uid);
   });
 
   const handleToggleEdit = async (checked: boolean) => {
@@ -299,7 +301,7 @@ export const RekapNilai = () => {
                 <Label htmlFor="edit-mode">Izinkan Edit Nilai</Label>
               </div>
             )}
-            {(isAdmin || isDosen) && (
+            {(isAdmin || isDosen || profile?.role === 'PembimbingLapangan') && (
               <div className="flex gap-2">
                 <Button variant="outline" onClick={handleExportExcel}>
                   <Download className="mr-2 h-4 w-4" /> Excel
