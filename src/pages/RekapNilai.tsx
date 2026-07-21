@@ -80,16 +80,29 @@ export const RekapNilai = () => {
          if (data.category === 'PeerReview') {
             if (!gradesMap[data.student_id]['PeerReview']) gradesMap[data.student_id]['PeerReview'] = [];
             gradesMap[data.student_id]['PeerReview'].push(data.score);
+         } else if (data.category === 'DosenPenguji') {
+            // Nilai penguji = rata-rata dari semua penguji (dosen pembimbing
+            // yang ikut menguji + dosen penguji resmi). Dikelompokkan per
+            // evaluator agar dokumen lama & baru dari evaluator yang sama
+            // tidak terhitung dua kali.
+            if (!gradesMap[data.student_id]['_pengujiByEval']) gradesMap[data.student_id]['_pengujiByEval'] = {};
+            gradesMap[data.student_id]['_pengujiByEval'][data.evaluator_id || doc.id] = data.score;
          } else {
             gradesMap[data.student_id][data.category] = data.score;
          }
        });
-       
-       // Calculate averages for peer review
+
+       // Calculate averages for peer review & penguji
        Object.keys(gradesMap).forEach(sId => {
          if (gradesMap[sId]['PeerReview'] && gradesMap[sId]['PeerReview'].length > 0) {
            const sum = gradesMap[sId]['PeerReview'].reduce((a:number, b:number) => a + b, 0);
            gradesMap[sId]['PeerReview'] = sum / gradesMap[sId]['PeerReview'].length;
+         }
+         const pengujiBucket = gradesMap[sId]['_pengujiByEval'];
+         if (pengujiBucket) {
+           const vals: number[] = Object.values(pengujiBucket);
+           gradesMap[sId]['DosenPenguji'] = vals.reduce((a, b) => a + b, 0) / vals.length;
+           delete gradesMap[sId]['_pengujiByEval'];
          }
        });
        
