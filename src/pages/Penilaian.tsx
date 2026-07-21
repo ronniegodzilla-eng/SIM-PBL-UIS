@@ -270,7 +270,13 @@ export const Penilaian = () => {
   const groupMatchesGraderRole = (group: any) => {
     if (!group) return false;
     if (graderRoleKey === 'DosenPembimbing') return group.dsn_pembimbing_id === profile?.uid;
-    if (graderRoleKey === 'PembimbingLapangan') return group.pmb_lapangan_id === profile?.uid;
+    if (graderRoleKey === 'PembimbingLapangan') {
+      // Nilai Pembimbing Lapangan diinput oleh Dosen Pembimbing kelompok itu
+      // (pembimbing lapangan di lokasi umumnya tidak memakai sistem). Akun
+      // Pembimbing Lapangan mandiri tetap menilai kelompok dampingannya.
+      if (profile?.role === 'Dosen') return group.dsn_pembimbing_id === profile?.uid;
+      return group.pmb_lapangan_id === profile?.uid;
+    }
     if (graderRoleKey === 'DosenPenguji') return pengujiGroupIds.includes(group.id);
     return true; // Sosialisasi / Admin: semua
   };
@@ -333,7 +339,7 @@ export const Penilaian = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="DosenPembimbing">Sebagai Dosen Pembimbing</SelectItem>
-                <SelectItem value="PembimbingLapangan">Sebagai Pembimbing Lapangan</SelectItem>
+                <SelectItem value="PembimbingLapangan">Input Nilai Pembimbing Lapangan</SelectItem>
                 <SelectItem value="DosenPenguji">Sebagai Dosen Penguji</SelectItem>
               </SelectContent>
             </Select>
