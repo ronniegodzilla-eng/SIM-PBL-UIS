@@ -12,7 +12,11 @@
 import { initializeApp, cert, getApps, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+
+// ID database Firestore bernama yang dipakai aplikasi ini (bukan rahasia —
+// nilainya sama dengan yang ada di bundle klien). Di-inline agar fungsi tidak
+// bergantung pada impor JSON dari luar folder api/ (bisa gagal di-bundle).
+const FIRESTORE_DATABASE_ID = 'ai-studio-ab4461e6-4024-404d-803b-03eb10d1fa0d';
 
 function getAdminApp(): App {
   const existing = getApps();
@@ -32,8 +36,7 @@ function getAdminApp(): App {
   // Perbaiki private_key: saat JSON ditempel ke Environment Variable, urutan
   // "\n" sering tersimpan sebagai teks literal (backslash-n) alih-alih baris
   // baru sungguhan, sehingga PEM tidak valid dan Admin SDK gagal menandatangani
-  // token (muncul sebagai error 500 saat mengakses Firestore/Auth). Normalisasi
-  // ini idempoten: kalau key sudah benar, tidak ada yang berubah.
+  // token. Normalisasi ini idempoten.
   if (creds && typeof creds.private_key === 'string') {
     creds.private_key = creds.private_key.replace(/\\n/g, '\n');
   }
@@ -46,18 +49,11 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  let app: App;
   try {
-    app = getAdminApp();
-  } catch (err: any) {
-    res.status(503).json({ error: err.message || 'Server belum dikonfigurasi.' });
-    return;
-  }
+    const app = getAdminApp();
+    const adminAuth = getAuth(app);
+    const db = getFirestore(app, FIRESTORE_DATABASE_ID);
 
-  const adminAuth = getAuth(app);
-  const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
-
-  try {
     // 1. Verifikasi identitas pemanggil.
     const authHeader = String(req.headers.authorization || '');
     const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -113,8 +109,11 @@ export default async function handler(req: any, res: any) {
       res.status(404).json({ error: 'Akun login (Firebase Auth) untuk pengguna ini tidak ditemukan.' });
       return;
     }
-    // Teruskan detail error (tanpa nilai rahasia) agar mudah didiagnosis:
-    // mis. "Failed to parse private key", "DECODER routines", "PERMISSION_DENIED".
+    if (err?.message && err.message.includes('FIREBASE_SERVICE_ACCOUNT')) {
+      res.status(503).json({ error: err.message });
+      return;
+    }
+    // Teruskan detail error (tanpa nilai rahasia) agar mudah didiagnosis.
     const detail = String(err?.code || err?.message || 'unknown').slice(0, 300);
     res.status(500).json({ error: `Terjadi kesalahan pada server: ${detail}` });
   }
