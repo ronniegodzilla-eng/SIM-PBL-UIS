@@ -29,6 +29,14 @@ function getAdminApp(): App {
   } catch {
     creds = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
   }
+  // Perbaiki private_key: saat JSON ditempel ke Environment Variable, urutan
+  // "\n" sering tersimpan sebagai teks literal (backslash-n) alih-alih baris
+  // baru sungguhan, sehingga PEM tidak valid dan Admin SDK gagal menandatangani
+  // token (muncul sebagai error 500 saat mengakses Firestore/Auth). Normalisasi
+  // ini idempoten: kalau key sudah benar, tidak ada yang berubah.
+  if (creds && typeof creds.private_key === 'string') {
+    creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+  }
   return initializeApp({ credential: cert(creds), projectId: creds.project_id });
 }
 
@@ -105,6 +113,9 @@ export default async function handler(req: any, res: any) {
       res.status(404).json({ error: 'Akun login (Firebase Auth) untuk pengguna ini tidak ditemukan.' });
       return;
     }
-    res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+    // Teruskan detail error (tanpa nilai rahasia) agar mudah didiagnosis:
+    // mis. "Failed to parse private key", "DECODER routines", "PERMISSION_DENIED".
+    const detail = String(err?.code || err?.message || 'unknown').slice(0, 300);
+    res.status(500).json({ error: `Terjadi kesalahan pada server: ${detail}` });
   }
 }
