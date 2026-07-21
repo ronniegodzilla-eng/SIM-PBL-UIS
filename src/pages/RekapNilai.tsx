@@ -8,7 +8,7 @@ import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
-import { Download, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Download, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -22,6 +22,8 @@ export const RekapNilai = () => {
   const [groups, setGroups] = useState<any[]>([]);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [grades, setGrades] = useState<any>({});
+  const [examSchedules, setExamSchedules] = useState<any[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
 
@@ -102,6 +104,8 @@ export const RekapNilai = () => {
          if (pengujiBucket) {
            const vals: number[] = Object.values(pengujiBucket);
            gradesMap[sId]['DosenPenguji'] = vals.reduce((a, b) => a + b, 0) / vals.length;
+           // Simpan daftar uid penguji yang SUDAH mengisi (untuk cek yang belum).
+           gradesMap[sId]['_pengujiEvaluators'] = Object.keys(pengujiBucket);
            delete gradesMap[sId]['_pengujiByEval'];
          }
        });
@@ -115,12 +119,25 @@ export const RekapNilai = () => {
       }
     });
 
+    // Jadwal ujian (untuk tahu penguji resmi tiap kelompok) & peta nama
+    // pengguna (untuk menyebut siapa yang belum mengisi nilai penguji).
+    const unsubExam = onSnapshot(collection(db, 'exam_schedules'), (snap) => {
+      setExamSchedules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    const unsubAllUsers = onSnapshot(collection(db, 'users'), (snap) => {
+      const map: Record<string, any> = {};
+      snap.forEach(d => { map[d.id] = d.data(); });
+      setUsersMap(map);
+    });
+
     return () => {
       unsubStudents();
       unsubGroups();
       unsubMembers();
       unsubGrades();
       unsubSettings();
+      unsubExam();
+      unsubAllUsers();
     };
   }, [profile]);
 
@@ -182,7 +199,26 @@ export const RekapNilai = () => {
       const pengujiScore = sGrades['DosenPenguji'] || 0;
       const peerScore = sGrades['PeerReview'] || 0;
       const finalScore = (sosialisasiScore * 0.1) + (plScore * 0.1) + (dpScore * 0.5) + (pengujiScore * 0.2) + (peerScore * 0.1);
-      
+
+      // Cek penguji yang belum mengisi nilai: hanya relevan bila kelompok
+      // sudah dijadwalkan ujian. Penguji yang diharapkan = dosen pembimbing
+      // (ikut menguji) + dosen penguji resmi pada jadwal.
+      const schedule = examSchedules.find(s => s.group_id === group?.id);
+      const submittedPenguji: string[] = sGrades['_pengujiEvaluators'] || [];
+      const missingPenguji: string[] = [];
+      if (schedule && group) {
+        const expected: { uid: string; label: string }[] = [];
+        if (group.dsn_pembimbing_id) {
+          expected.push({ uid: group.dsn_pembimbing_id, label: `${usersMap[group.dsn_pembimbing_id]?.name || 'Dosen Pembimbing'} (Dosen Pembimbing)` });
+        }
+        if (schedule.penguji_id && schedule.penguji_id !== group.dsn_pembimbing_id) {
+          expected.push({ uid: schedule.penguji_id, label: `${usersMap[schedule.penguji_id]?.name || 'Dosen Penguji'} (Dosen Penguji)` });
+        }
+        expected.forEach(e => {
+          if (!submittedPenguji.includes(e.uid)) missingPenguji.push(e.label);
+        });
+      }
+
       return {
         ...student,
         group_name: group ? group.group_name : '-',
@@ -193,6 +229,7 @@ export const RekapNilai = () => {
         pengujiScore,
         peerScore,
         finalScore,
+        missingPenguji,
         letterGrade: finalScore > 0 ? getNilaiHuruf(finalScore) : '-'
       };
     });
@@ -212,7 +249,7 @@ export const RekapNilai = () => {
     }
 
     return searched;
-  }, [filteredStudents, groupMembers, groups, grades, searchQuery, sortConfig]);
+  }, [filteredStudents, groupMembers, groups, grades, searchQuery, sortConfig, examSchedules, usersMap]);
 
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
     if (!sortConfig || sortConfig.key !== columnKey) return <ArrowUpDown className="ml-2 h-4 w-4" />;
@@ -229,6 +266,7 @@ export const RekapNilai = () => {
       'Pembimbing Lapangan (10%)': student.plScore ? student.plScore.toFixed(1) : '-',
       'Dosen Pembimbing (50%)': student.dpScore ? student.dpScore.toFixed(1) : '-',
       'Dosen Penguji (20%)': student.pengujiScore ? student.pengujiScore.toFixed(1) : '-',
+      'Penguji Belum Mengisi': student.missingPenguji && student.missingPenguji.length > 0 ? student.missingPenguji.join('; ') : '-',
       'Peer Review (10%)': student.peerScore ? student.peerScore.toFixed(1) : '-',
       'Nilai Akhir': student.finalScore > 0 ? student.finalScore.toFixed(2) : '-',
       'Nilai Huruf': student.letterGrade,
@@ -373,7 +411,18 @@ export const RekapNilai = () => {
                   <TableCell className="text-center">{student.sosialisasiScore ? student.sosialisasiScore.toFixed(1) : '-'}</TableCell>
                   <TableCell className="text-center">{student.plScore ? student.plScore.toFixed(1) : '-'}</TableCell>
                   <TableCell className="text-center">{student.dpScore ? student.dpScore.toFixed(1) : '-'}</TableCell>
-                  <TableCell className="text-center">{student.pengujiScore ? student.pengujiScore.toFixed(1) : '-'}</TableCell>
+                  <TableCell className="text-center">
+                    <div>{student.pengujiScore ? student.pengujiScore.toFixed(1) : '-'}</div>
+                    {student.missingPenguji && student.missingPenguji.length > 0 && (
+                      <div
+                        className="mt-1 inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-tight"
+                        title={`Belum mengisi nilai penguji: ${student.missingPenguji.join(', ')}`}
+                      >
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>Belum: {student.missingPenguji.join(', ')}</span>
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="text-center">{student.peerScore ? student.peerScore.toFixed(1) : '-'}</TableCell>
                   <TableCell className="text-right font-bold text-primary">
                       {student.finalScore > 0 ? student.finalScore.toFixed(2) : '-'}
