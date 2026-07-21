@@ -150,6 +150,9 @@ export const Penilaian = () => {
             const grad = d.data();
             if (finalStudentIds.includes(grad.student_id)) {
                if (!gradesMap[grad.student_id]) gradesMap[grad.student_id] = {};
+               // Kategori penguji bisa punya beberapa penilai; "Nilai Saya"
+               // harus menampilkan nilai milik pengguna saat ini saja.
+               if (grad.category === 'DosenPenguji' && grad.evaluator_id !== profile.uid) return;
                gradesMap[grad.student_id][grad.category] = { score: grad.score, detail: grad.rubric_scores };
             }
           });
@@ -190,7 +193,12 @@ export const Penilaian = () => {
       setLoading(true);
 
       const mem = groupMembers.find(m => m.student_id === selectedStudent.id);
-      const gradeId = `${selectedStudent.id}_${graderRoleKey}`;
+      // Kategori penguji dapat dinilai lebih dari satu orang (dosen pembimbing
+      // yang menguji + dosen penguji), jadi tiap penilai punya dokumen sendiri
+      // agar tidak saling menimpa. Kategori lain hanya satu penilai.
+      const gradeId = graderRoleKey === 'DosenPenguji'
+        ? `${selectedStudent.id}_DosenPenguji_${profile.uid}`
+        : `${selectedStudent.id}_${graderRoleKey}`;
       await setDoc(doc(db, 'grades', gradeId), {
         student_id: selectedStudent.id,
         group_member_id: mem?.id,
@@ -277,7 +285,13 @@ export const Penilaian = () => {
       if (profile?.role === 'Dosen') return group.dsn_pembimbing_id === profile?.uid;
       return group.pmb_lapangan_id === profile?.uid;
     }
-    if (graderRoleKey === 'DosenPenguji') return pengujiGroupIds.includes(group.id);
+    if (graderRoleKey === 'DosenPenguji') {
+      // Penguji resmi menilai kelompok yang dijadwalkan untuknya. Dosen
+      // Pembimbing juga ikut menguji mahasiswa bimbingannya dalam seminar,
+      // jadi kelompok bimbingannya ikut tampil di peran penguji.
+      return pengujiGroupIds.includes(group.id) ||
+        (profile?.role === 'Dosen' && group.dsn_pembimbing_id === profile?.uid);
+    }
     return true; // Sosialisasi / Admin: semua
   };
 
@@ -361,7 +375,10 @@ export const Penilaian = () => {
           <CardTitle>
             Daftar Mahasiswa {graderRoleKey === 'Sosialisasi' ? '(Penilaian Administrasi)' : `(Sebagai ${graderRoleKey})`}
           </CardTitle>
-          <CardDescription>Pilih mahasiswa untuk memberikan nilai.</CardDescription>
+          <CardDescription>
+            Pilih mahasiswa untuk memberikan nilai.
+            {graderRoleKey === 'DosenPenguji' && ' Nilai penguji akhir adalah rata-rata dari seluruh penguji (dosen pembimbing yang menguji + dosen penguji).'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {displayedStudents.length === 0 ? (
