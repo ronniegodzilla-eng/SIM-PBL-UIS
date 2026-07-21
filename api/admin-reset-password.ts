@@ -1,21 +1,19 @@
 // Vercel Serverless Function: reset password langsung oleh Admin.
 //
-// Firebase client SDK tidak mengizinkan mengubah password user lain, jadi
-// endpoint ini memakai Firebase Admin SDK. Kredensialnya diambil dari env
-// FIREBASE_SERVICE_ACCOUNT (JSON service account — lihat docs/SECURITY_SETUP.md).
+// Memakai Firebase Admin SDK HANYA untuk Auth (verifikasi ID token & set
+// password) — modul firebase-admin/firestore sengaja TIDAK diimpor karena
+// menarik dependensi gRPC/protobuf yang kerap gagal di-bundle di serverless
+// Vercel dan membuat fungsi crash saat module-load (gejala: HTTP 500 dengan
+// respons non-JSON). Akses Firestore dilakukan lewat REST API.
 //
-// Keamanan: pemanggil harus menyertakan Firebase ID token (Authorization:
+// Keamanan: pemanggil wajib menyertakan Firebase ID token (Authorization:
 // Bearer <token>). Token diverifikasi, lalu role pemanggil dibaca dari
-// Firestore — hanya Admin/AdminProdi yang diizinkan, dan AdminProdi tidak
-// boleh mereset akun Admin/AdminProdi (mengikuti firestore.rules).
+// Firestore — hanya Admin/AdminProdi aktif yang diizinkan, dan AdminProdi
+// tidak boleh mereset akun Admin/AdminProdi (mengikuti firestore.rules).
 
 import { initializeApp, cert, getApps, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
 
-// ID database Firestore bernama yang dipakai aplikasi ini (bukan rahasia —
-// nilainya sama dengan yang ada di bundle klien). Di-inline agar fungsi tidak
-// bergantung pada impor JSON dari luar folder api/ (bisa gagal di-bundle).
 const FIRESTORE_DATABASE_ID = 'ai-studio-ab4461e6-4024-404d-803b-03eb10d1fa0d';
 
 function getAdminApp(): App {
@@ -26,21 +24,60 @@ function getAdminApp(): App {
   if (!raw) {
     throw new Error('FIREBASE_SERVICE_ACCOUNT belum dikonfigurasi di server.');
   }
-  // Terima JSON mentah maupun base64 dari JSON tersebut.
   let creds: any;
   try {
     creds = JSON.parse(raw);
   } catch {
     creds = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
   }
-  // Perbaiki private_key: saat JSON ditempel ke Environment Variable, urutan
-  // "\n" sering tersimpan sebagai teks literal (backslash-n) alih-alih baris
-  // baru sungguhan, sehingga PEM tidak valid dan Admin SDK gagal menandatangani
-  // token. Normalisasi ini idempoten.
+  // Normalisasi private_key: "\n" literal (akibat paste ke env var) -> baris
+  // baru sungguhan. Idempoten.
   if (creds && typeof creds.private_key === 'string') {
     creds.private_key = creds.private_key.replace(/\\n/g, '\n');
   }
   return initializeApp({ credential: cert(creds), projectId: creds.project_id });
+}
+
+function getProjectId(app: App): string {
+  return (app.options as any).projectId || (app.options as any).credential?.projectId || '';
+}
+
+async function getAccessToken(app: App): Promise<string> {
+  const cred: any = (app.options as any).credential;
+  const t = await cred.getAccessToken();
+  return t.access_token;
+}
+
+function docBase(projectId: string): string {
+  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${FIRESTORE_DATABASE_ID}/documents`;
+}
+
+// Ambil field string dari sebuah dokumen users lewat Firestore REST.
+async function fetchUserFields(projectId: string, token: string, uid: string): Promise<Record<string, any> | null> {
+  const r = await fetch(`${docBase(projectId)}/users/${uid}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) {
+    throw new Error(`Firestore GET ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const j: any = await r.json();
+  return j.fields || {};
+}
+
+const strField = (fields: Record<string, any> | null, key: string): string | undefined =>
+  fields?.[key]?.stringValue;
+
+async function setMustChangePassword(projectId: string, token: string, uid: string): Promise<void> {
+  const url = `${docBase(projectId)}/users/${uid}?updateMask.fieldPaths=mustChangePassword`;
+  const r = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { mustChangePassword: { booleanValue: true } } }),
+  });
+  if (!r.ok) {
+    throw new Error(`Firestore PATCH ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -52,7 +89,7 @@ export default async function handler(req: any, res: any) {
   try {
     const app = getAdminApp();
     const adminAuth = getAuth(app);
-    const db = getFirestore(app, FIRESTORE_DATABASE_ID);
+    const projectId = getProjectId(app);
 
     // 1. Verifikasi identitas pemanggil.
     const authHeader = String(req.headers.authorization || '');
@@ -67,12 +104,13 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // 2. Pastikan pemanggil adalah Admin/AdminProdi aktif.
-    const callerSnap = await db.doc(`users/${decoded.uid}`).get();
-    const caller = callerSnap.exists ? (callerSnap.data() as any) : null;
-    const callerRole = caller?.role;
-    const isCallerAdmin = callerRole === 'Admin' && caller?.account_status === 'Active';
-    const isCallerAdminProdi = callerRole === 'AdminProdi' && caller?.account_status === 'Active';
+    // 2. Pastikan pemanggil adalah Admin/AdminProdi aktif (via Firestore REST).
+    const token = await getAccessToken(app);
+    const callerFields = await fetchUserFields(projectId, token, decoded.uid);
+    const callerRole = strField(callerFields, 'role');
+    const callerStatus = strField(callerFields, 'account_status');
+    const isCallerAdmin = callerRole === 'Admin' && callerStatus === 'Active';
+    const isCallerAdminProdi = callerRole === 'AdminProdi' && callerStatus === 'Active';
     if (!isCallerAdmin && !isCallerAdminProdi) {
       res.status(403).json({ error: 'Forbidden: hanya Admin yang dapat mereset password.' });
       return;
@@ -91,16 +129,18 @@ export default async function handler(req: any, res: any) {
     }
 
     // 4. AdminProdi tidak boleh mereset akun Admin/AdminProdi.
-    const targetSnap = await db.doc(`users/${targetUid}`).get();
-    const targetRole = targetSnap.exists ? (targetSnap.data() as any)?.role : null;
-    if (isCallerAdminProdi && (targetRole === 'Admin' || targetRole === 'AdminProdi')) {
-      res.status(403).json({ error: 'Forbidden: AdminProdi tidak dapat mereset akun Admin.' });
-      return;
+    if (isCallerAdminProdi) {
+      const targetFields = await fetchUserFields(projectId, token, targetUid);
+      const targetRole = strField(targetFields, 'role');
+      if (targetRole === 'Admin' || targetRole === 'AdminProdi') {
+        res.status(403).json({ error: 'Forbidden: AdminProdi tidak dapat mereset akun Admin.' });
+        return;
+      }
     }
 
     // 5. Setel password baru dan wajibkan ganti password saat login berikutnya.
     await adminAuth.updateUser(targetUid, { password: newPassword });
-    await db.doc(`users/${targetUid}`).set({ mustChangePassword: true }, { merge: true });
+    await setMustChangePassword(projectId, token, targetUid);
 
     res.status(200).json({ success: true });
   } catch (err: any) {
@@ -113,7 +153,6 @@ export default async function handler(req: any, res: any) {
       res.status(503).json({ error: err.message });
       return;
     }
-    // Teruskan detail error (tanpa nilai rahasia) agar mudah didiagnosis.
     const detail = String(err?.code || err?.message || 'unknown').slice(0, 300);
     res.status(500).json({ error: `Terjadi kesalahan pada server: ${detail}` });
   }
