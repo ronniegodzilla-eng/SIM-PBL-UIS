@@ -23,6 +23,7 @@ export const Penilaian = () => {
   const [rubricScores, setRubricScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [graderRoleKey, setGraderRoleKey] = useState('DosenPenguji');
+  const [pengujiGroupIds, setPengujiGroupIds] = useState<string[]>([]);
   const [isEditActive, setIsEditActive] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,13 +87,22 @@ export const Penilaian = () => {
       let g: any[] = [];
       snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
 
+      let pengujiIds: string[] = [];
       if (profile.role === 'Dosen') {
         const qSchedules = query(collection(db, 'exam_schedules'), where('penguji_id', '==', profile.uid));
         const schedSnapshot = await getDocs(qSchedules);
-        const pengujiGroupIds = schedSnapshot.docs.map(doc => doc.data().group_id);
-        g = g.filter(group => pengujiGroupIds.includes(group.id) || group.dsn_pembimbing_id === profile.uid);
+        pengujiIds = schedSnapshot.docs.map(doc => doc.data().group_id);
+        // Muat SEMUA relasi dosen ini: penguji, dosen pembimbing, dan
+        // pembimbing lapangan. Pemisahan per-peran dilakukan saat render
+        // berdasarkan peran penilai yang dipilih.
+        g = g.filter(group =>
+          pengujiIds.includes(group.id) ||
+          group.dsn_pembimbing_id === profile.uid ||
+          group.pmb_lapangan_id === profile.uid
+        );
       }
-      
+      setPengujiGroupIds(pengujiIds);
+
       setGroups(g);
 
       // We still want to see their group name if they have one
@@ -255,11 +265,22 @@ export const Penilaian = () => {
     return sortConfig.direction === 'asc' ? <ArrowUp className="ml-2 h-4 w-4 inline-block" /> : <ArrowDown className="ml-2 h-4 w-4 inline-block" />;
   };
 
+  // Hanya tampilkan mahasiswa dari kelompok yang relevan dengan PERAN penilai
+  // yang sedang dipilih — bukan gabungan semua relasi dosen.
+  const groupMatchesGraderRole = (group: any) => {
+    if (!group) return false;
+    if (graderRoleKey === 'DosenPembimbing') return group.dsn_pembimbing_id === profile?.uid;
+    if (graderRoleKey === 'PembimbingLapangan') return group.pmb_lapangan_id === profile?.uid;
+    if (graderRoleKey === 'DosenPenguji') return pengujiGroupIds.includes(group.id);
+    return true; // Sosialisasi / Admin: semua
+  };
+
   const getFilteredAndSortedStudents = () => {
     return students
       .filter((s) => {
         const member = groupMembers.find(m => m.student_id === s.id);
         const group = groups.find(g => g.id === member?.group_id);
+        if (!groupMatchesGraderRole(group)) return false;
         const q = searchQuery.toLowerCase();
         const studentNameMatches = s.name?.toLowerCase().includes(q);
         const stundentProdiMatches = s.prodi?.toLowerCase().includes(q);
@@ -337,8 +358,8 @@ export const Penilaian = () => {
           <CardDescription>Pilih mahasiswa untuk memberikan nilai.</CardDescription>
         </CardHeader>
         <CardContent>
-          {students.length === 0 ? (
-            <div className="text-center py-8 text-slate-500">Belum ada data mahasiswa yang dapat dinilai.</div>
+          {displayedStudents.length === 0 ? (
+            <div className="text-center py-8 text-slate-500">Belum ada mahasiswa untuk peran penilaian ini.</div>
           ) : (
             <div className="border rounded-lg overflow-hidden">
               <Table>
