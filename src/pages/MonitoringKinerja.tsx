@@ -74,6 +74,15 @@ export const MonitoringKinerja = () => {
     return users.find(u => u.uid === id || u.id === id)?.name || id;
   };
 
+  // Status pengisian nilai per kelompok: Belum / Sebagian (x dari y anggota) /
+  // Sudah lengkap.
+  const NilaiBadge = ({ count, total }: { count: number; total: number }) => {
+    if (total === 0) return <span className="text-xs text-slate-400">-</span>;
+    if (count === 0) return <Badge variant="destructive">Belum</Badge>;
+    if (count < total) return <Badge className="bg-amber-500">Sebagian ({count}/{total})</Badge>;
+    return <Badge variant="default" className="bg-green-500">Sudah ({count}/{total})</Badge>;
+  };
+
   const handleToggleKehadiran = async (groupId: string, field: 'dp_hadir_pembukaan' | 'dp_hadir_penutupan' | 'dp_hadir_pengabdian', currentValue: boolean) => {
     try {
       await updateDoc(doc(db, 'pbl_groups', groupId), {
@@ -126,11 +135,23 @@ export const MonitoringKinerja = () => {
                 const hasPengabdian = groupBA.some(b => b.type === 'Pengabdian pada Masyarakat');
                 const hasUjian = groupBA.some(b => b.type === 'Ujian');
 
-                // Check Grades
-                const groupGrades = grades.filter(g => g.group_id === group.id);
-                const hasNilaiDP = groupGrades.some(g => g.role === 'DosenPembimbing');
-                const hasNilaiPL = groupGrades.some(g => g.role === 'PembimbingLapangan');
-                const hasNilaiPenguji = groupGrades.some(g => g.role === 'DosenPenguji');
+                // Check Grades. Dokumen grades TIDAK punya field group_id dan
+                // kategorinya disimpan di field 'category' (bukan 'role'), jadi
+                // kaitkan lewat student_id -> group_members.
+                const memberStudentIds = groupMembers
+                  .filter(m => m.group_id === group.id && m.status === 'Approved')
+                  .map(m => m.student_id);
+                const totalAnggota = memberStudentIds.length;
+                const groupGrades = grades.filter(g => memberStudentIds.includes(g.student_id));
+
+                // Hitung berapa mahasiswa yang sudah dinilai per kategori
+                // (pakai Set: kategori penguji bisa punya >1 penilai).
+                const countDinilai = (cat: string) =>
+                  new Set(groupGrades.filter(g => g.category === cat).map(g => g.student_id)).size;
+
+                const nilaiDPCount = countDinilai('DosenPembimbing');
+                const nilaiPLCount = countDinilai('PembimbingLapangan');
+                const nilaiPengujiCount = countDinilai('DosenPenguji');
 
                 const exam = examSchedules.find(e => e.group_id === group.id);
                 const pengujiName = getUserName(exam?.penguji_id);
@@ -156,13 +177,13 @@ export const MonitoringKinerja = () => {
                        {hasUjian ? <CheckCircle2 className="w-5 h-5 text-green-500 mx-auto" /> : <XCircle className="w-5 h-5 text-red-500 mx-auto" />}
                     </TableCell>
                     <TableCell className="text-center">
-                       {hasNilaiDP ? <Badge variant="default" className="bg-green-500">Sudah</Badge> : <Badge variant="destructive">Belum</Badge>}
+                       <NilaiBadge count={nilaiDPCount} total={totalAnggota} />
                     </TableCell>
                     <TableCell className="text-center">
-                       {hasNilaiPL ? <Badge variant="default" className="bg-green-500">Sudah</Badge> : <Badge variant="destructive">Belum</Badge>}
+                       <NilaiBadge count={nilaiPLCount} total={totalAnggota} />
                     </TableCell>
                     <TableCell className="text-center">
-                       {hasNilaiPenguji ? <Badge variant="default" className="bg-green-500">Sudah</Badge> : <Badge variant="destructive">Belum</Badge>}
+                       <NilaiBadge count={nilaiPengujiCount} total={totalAnggota} />
                     </TableCell>
                   </TableRow>
                 );
@@ -253,8 +274,9 @@ export const MonitoringKinerja = () => {
             <TableBody>
               {groupMembers.filter(m => m.status === 'Approved').map(member => {
                 const group = groups.find(g => g.id === member.group_id);
-                const mhsUser = users.find(u => u.uid === member.student_id);
-                const nameDisplay = mhsUser ? `${mhsUser.student_id || '-'} - ${mhsUser.name}` : member.student_id;
+                // NIM tersimpan di field id_number pada dokumen users.
+                const mhsUser = users.find(u => u.uid === member.student_id || u.id === member.student_id);
+                const nameDisplay = mhsUser ? `${mhsUser.id_number || '-'} - ${mhsUser.name}` : member.student_id;
 
                 const mhsLogbooks = logbooks.filter(l => l.student_id === member.student_id);
                 const validatedLogbooks = mhsLogbooks.filter(l => l.status === 'Approved').length;
