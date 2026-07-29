@@ -5,7 +5,9 @@ import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Checkbox } from '../components/ui/checkbox';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Download } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { generateBeritaAcaraPdf } from '../lib/beritaAcaraPdf';
 import { toast } from 'sonner';
 
 interface GroupData {
@@ -82,6 +84,55 @@ export const MonitoringKinerja = () => {
     if (count < total) return <Badge className="bg-amber-500">Sebagian ({count}/{total})</Badge>;
     return <Badge variant="default" className="bg-green-500">Sudah ({count}/{total})</Badge>;
   };
+
+  // Kehadiran dosen menurut berita acara yang ia isi sendiri.
+  const KEGIATAN = ['Pembukaan', 'Penutupan', 'Pengabdian pada Masyarakat', 'Ujian'] as const;
+
+  const findBA = (groupId: string, type: string) =>
+    beritaAcara.find(b => b.group_id === groupId && b.type === type);
+
+  const BAHadirBadge = ({ groupId, type }: { groupId: string; type: string }) => {
+    const ba = findBA(groupId, type);
+    if (!ba) return <div className="text-[10px] text-slate-400 mt-1">BA belum diisi</div>;
+    if (ba.dosen_hadir === true) return <div className="text-[10px] text-green-600 mt-1">BA: Hadir</div>;
+    if (ba.dosen_hadir === false) return <div className="text-[10px] text-red-600 mt-1">BA: Tidak Hadir</div>;
+    return <div className="text-[10px] text-amber-600 mt-1">BA: belum dikonfirmasi</div>;
+  };
+
+  // Anggota kelompok (dokumen users) untuk lampiran daftar hadir pada PDF.
+  const studentsOfGroup = (groupId: string) => {
+    const ids = groupMembers
+      .filter(m => m.group_id === groupId && m.status === 'Approved')
+      .map(m => m.student_id);
+    return users.filter(u => ids.includes(u.uid) || ids.includes(u.id));
+  };
+
+  // Unduh seluruh berita acara milik satu dosen untuk satu jenis kegiatan
+  // (satu kelompok = satu halaman).
+  const handleDownloadBA = (dosenId: string, type: string) => {
+    const list = beritaAcara.filter(b => b.dosen_id === dosenId && b.type === type);
+    if (list.length === 0) {
+      toast.error('Belum ada berita acara untuk dosen & kegiatan ini.');
+      return;
+    }
+    const dosenName = getUserName(dosenId);
+    const inputs = list.map(ba => ({
+      berita: ba,
+      group: groups.find(g => g.id === ba.group_id),
+      students: studentsOfGroup(ba.group_id),
+      dosenName,
+    }));
+    generateBeritaAcaraPdf(
+      inputs,
+      `Berita_Acara_${type.replace(/\s+/g, '_')}_${dosenName.replace(/\s+/g, '_')}.pdf`
+    );
+    toast.success(`${list.length} berita acara diunduh`);
+  };
+
+  // Daftar dosen pembimbing yang punya kelompok (untuk rekap per dosen).
+  const dosenPembimbingIds = Array.from(
+    new Set(groups.map(g => g.dsn_pembimbing_id).filter(Boolean) as string[])
+  );
 
   const handleToggleKehadiran = async (groupId: string, field: 'dp_hadir_pembukaan' | 'dp_hadir_penutupan' | 'dp_hadir_pengabdian', currentValue: boolean) => {
     try {
@@ -202,7 +253,7 @@ export const MonitoringKinerja = () => {
         <CardHeader>
           <CardTitle>Kehadiran Dosen Pembimbing pada Kegiatan Utama</CardTitle>
           <CardDescription>
-            Menu bagi admin untuk mengabsen kehadiran Dosen Pembimbing pada acara pembukaan, penutupan, dan pengabdian masyarakat.
+            Centang = catatan kehadiran versi admin. Keterangan "BA" di bawahnya adalah kehadiran yang dikonfirmasi sendiri oleh Dosen Pembimbing saat mengisi berita acara.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -227,18 +278,21 @@ export const MonitoringKinerja = () => {
                         checked={!!group.dp_hadir_pembukaan} 
                         onCheckedChange={(checked) => handleToggleKehadiran(group.id, 'dp_hadir_pembukaan', !!group.dp_hadir_pembukaan)} 
                       />
+                      <BAHadirBadge groupId={group.id} type="Pembukaan" />
                     </TableCell>
                     <TableCell className="text-center">
                       <Checkbox 
                         checked={!!group.dp_hadir_penutupan} 
                         onCheckedChange={(checked) => handleToggleKehadiran(group.id, 'dp_hadir_penutupan', !!group.dp_hadir_penutupan)} 
                       />
+                      <BAHadirBadge groupId={group.id} type="Penutupan" />
                     </TableCell>
                     <TableCell className="text-center">
                       <Checkbox 
                         checked={!!group.dp_hadir_pengabdian} 
                         onCheckedChange={(checked) => handleToggleKehadiran(group.id, 'dp_hadir_pengabdian', !!group.dp_hadir_pengabdian)} 
                       />
+                      <BAHadirBadge groupId={group.id} type="Pengabdian pada Masyarakat" />
                     </TableCell>
                   </TableRow>
                 );
@@ -246,6 +300,63 @@ export const MonitoringKinerja = () => {
               {groups.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-4">Belum ada kelompok data.</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Berita Acara per Dosen &amp; Kegiatan</CardTitle>
+          <CardDescription>
+            Unduh berita acara tiap dosen per jenis kegiatan. Bila dosen membimbing beberapa kelompok, seluruhnya digabung dalam satu PDF (satu kelompok per halaman).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Dosen Pembimbing</TableHead>
+                {KEGIATAN.map(k => (
+                  <TableHead key={k} className="text-center">{k === 'Pengabdian pada Masyarakat' ? 'Pengabdian' : k}</TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dosenPembimbingIds.map(dosenId => {
+                const dosenGroups = groups.filter(g => g.dsn_pembimbing_id === dosenId);
+                return (
+                  <TableRow key={'ba-' + dosenId}>
+                    <TableCell className="font-medium">
+                      <div>{getUserName(dosenId)}</div>
+                      <div className="text-xs text-slate-500">{dosenGroups.length} kelompok bimbingan</div>
+                    </TableCell>
+                    {KEGIATAN.map(k => {
+                      const list = beritaAcara.filter(b => b.dosen_id === dosenId && b.type === k);
+                      const hadirCount = list.filter(b => b.dosen_hadir === true).length;
+                      return (
+                        <TableCell key={k} className="text-center">
+                          {list.length === 0 ? (
+                            <span className="text-xs text-slate-400">Belum ada BA</span>
+                          ) : (
+                            <div className="flex flex-col items-center gap-1">
+                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleDownloadBA(dosenId, k)}>
+                                <Download className="w-3 h-3 mr-1" /> {list.length} BA
+                              </Button>
+                              <span className="text-[10px] text-slate-500">Hadir: {hadirCount}/{list.length}</span>
+                            </div>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })}
+              {dosenPembimbingIds.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-4">Belum ada dosen pembimbing yang ditugaskan.</TableCell>
                 </TableRow>
               )}
             </TableBody>
