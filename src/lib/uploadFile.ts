@@ -1,8 +1,12 @@
 import { auth } from '../firebase';
 
-// Batas ukuran unggahan (Apps Script sanggup jauh lebih besar, tapi kita batasi
-// agar encode base64 di browser tidak membekukan tab).
-const MAX_FILE_MB = 20;
+// Batas ukuran unggahan. Google Apps Script harus men-decode base64 penuh di
+// memori (Utilities.base64Decode) dalam satu eksekusi — file besar (>10MB)
+// sering membuat script kehabisan waktu/memori dan Google mengembalikan
+// halaman error HTML alih-alih JSON, sehingga upload gagal dengan pesan yang
+// membingungkan. Batas ini dijaga cukup rendah agar tetap aman di praktik,
+// bukan sekadar batas teoretis Apps Script.
+const MAX_FILE_MB = 10;
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -30,7 +34,7 @@ export async function uploadToGoogleDrive(file: File, prefix: string): Promise<s
   }
 
   if (file.size > MAX_FILE_MB * 1024 * 1024) {
-    throw new Error(`Ukuran file maksimal ${MAX_FILE_MB} MB.`);
+    throw new Error(`Ukuran file maksimal ${MAX_FILE_MB} MB. File "${file.name}" berukuran ${(file.size / 1024 / 1024).toFixed(1)} MB — kompres dulu (mis. pakai iLovePDF) sebelum diunggah.`);
   }
 
   const user = auth.currentUser;
@@ -55,9 +59,25 @@ export async function uploadToGoogleDrive(file: File, prefix: string): Promise<s
     }
   });
 
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(data.error || 'Gagal mengunggah ke Google Drive');
+  // Google Apps Script bisa mengembalikan halaman HTML (bukan JSON) saat
+  // script gagal dieksekusi — paling sering karena file terlalu besar untuk
+  // di-decode dalam satu eksekusi (timeout/kehabisan memori), atau izin
+  // deployment script berubah. Deteksi ini secara eksplisit agar pesan yang
+  // tampil jelas, bukan error mentah "Unexpected token '<'...".
+  const rawText = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    console.error('Respons non-JSON dari Apps Script:', rawText.slice(0, 500));
+    throw new Error(
+      `Gagal mengunggah "${file.name}": server Google Drive tidak merespons dengan benar (kemungkinan file terlalu besar untuk diproses, atau eksekusi script kehabisan waktu). ` +
+      `Coba kompres file agar lebih kecil (di bawah ${MAX_FILE_MB} MB), lalu unggah ulang. Jika masih gagal, hubungi admin untuk memeriksa Google Apps Script.`
+    );
+  }
+
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || `Gagal mengunggah ke Google Drive (HTTP ${response.status}).`);
   }
   return data.url;
 }
