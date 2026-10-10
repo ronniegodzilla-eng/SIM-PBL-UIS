@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -13,6 +14,7 @@ import { Checkbox } from '../ui/checkbox';
 import { Search, ArrowUp, ArrowDown } from 'lucide-react';
 
 export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
+  const { periodId } = usePeriod();
   const [logbooks, setLogbooks] = useState<any[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [students, setStudents] = useState<any>({});
@@ -28,7 +30,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
   const [selectedAtts, setSelectedAtts] = useState<string[]>([]);
 
   useEffect(() => {
-    if (groups.length === 0) return;
+    if (groups.length === 0 || !periodId) return;
 
     const qStudents = query(collection(db, 'users'), where('role', '==', 'Mahasiswa'));
     const unsubStudents = onSnapshot(qStudents, (snapshot) => {
@@ -42,7 +44,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
     const groupIds = groups.map(g => g.id);
     const groupsMap = groups.reduce((acc, g) => ({ ...acc, [g.id]: g.group_name }), {});
 
-    const qMembers = query(collection(db, 'group_members'));
+    const qMembers = periodQuery('group_members', periodId);
     const unsubMembers = onSnapshot(qMembers, (snapshot) => {
       const gMembers: any[] = [];
       const sIds: string[] = [];
@@ -65,7 +67,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
         return;
       }
       
-      const qLogbooks = query(collection(db, 'logbooks'), where('status', '==', 'Pending'));
+      const qLogbooks = periodQuery('logbooks', periodId, where('status', '==', 'Pending'));
       const unsubLogs = onSnapshot(qLogbooks, (snapLogs) => {
         const logs: any[] = [];
         snapLogs.forEach((lDoc) => {
@@ -77,7 +79,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
         setLogbooks(logs);
       });
 
-      const qAttendances = query(collection(db, 'attendances'), where('status', '==', 'Pending'));
+      const qAttendances = periodQuery('attendances', periodId, where('status', '==', 'Pending'));
       const unsubAtts = onSnapshot(qAttendances, (snapAtts) => {
         const atts: any[] = [];
         snapAtts.forEach((aDoc) => {
@@ -99,7 +101,7 @@ export const PersetujuanLogbook = ({ groups }: { groups: any[] }) => {
       unsubStudents();
       unsubMembers();
     };
-  }, [groups]);
+  }, [groups, periodId]);
 
   const handleApproveLogbook = async (id: string | string[]) => {
     try {

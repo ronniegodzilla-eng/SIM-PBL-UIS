@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, setDoc, arrayUnion } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { db, handleFirestoreError, OperationType, storage } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -13,6 +14,7 @@ import { Textarea } from '../ui/textarea';
 import { uploadToGoogleDrive } from '../../lib/uploadFile';
 
 export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string }) => {
+  const { periodId } = usePeriod();
   const { profile } = useAuth();
   const [reports, setReports] = useState<any[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
@@ -21,12 +23,12 @@ export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (groups.length === 0) return;
+    if (groups.length === 0 || !periodId) return;
 
     const groupIds = groups.map(g => g.id);
     
     // Listen for reports
-    const qReports = query(collection(db, 'pbl_reports'));
+    const qReports = periodQuery('pbl_reports', periodId);
     const unsubReports = onSnapshot(qReports, (snapshot) => {
       const reps: any[] = [];
       snapshot.forEach((doc) => {
@@ -39,7 +41,7 @@ export const BimbinganLaporan = ({ groups, role }: { groups: any[], role: string
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'pbl_reports'));
 
     return () => unsubReports();
-  }, [groups]);
+  }, [groups, periodId]);
 
   const handleApproveReport = async (report: any) => {
     try {

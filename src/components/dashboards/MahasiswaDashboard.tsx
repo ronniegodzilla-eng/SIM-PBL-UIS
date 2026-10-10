@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { where, onSnapshot, getDocs } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
+import { useMyMembership } from '../../hooks/useMyMembership';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { PendaftaranPBL } from './PendaftaranPBL';
 import { Button } from '../ui/button';
@@ -13,39 +14,49 @@ import { Link } from 'react-router-dom';
 
 export const MahasiswaDashboard = () => {
   const { profile } = useAuth();
-  const [groupMember, setGroupMember] = useState<any>(null);
+  const { periodId, period, periods } = usePeriod();
+  const { member: groupMember, loading: memberLoading } = useMyMembership();
   const [logbookCount, setLogbookCount] = useState(0);
   const [attendanceCount, setAttendanceCount] = useState(0);
   const [openGuide, setOpenGuide] = useState(false);
+  // Keanggotaan pada periode saat mahasiswa dinyatakan lulus PBL — dipakai
+  // untuk tetap menampilkan nilai akhirnya setelah periode itu ditutup.
+  const [passedMember, setPassedMember] = useState<any>(null);
+
+  const passedPeriodId: string | undefined = (profile as any)?.pbl_period_id;
+  const hasPassed = (profile as any)?.pbl_status === 'Lulus';
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !periodId) return;
 
-    const q = query(collection(db, 'group_members'), where('student_id', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        setGroupMember({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
-      } else {
-        setGroupMember(null);
-      }
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'group_members'));
-
-    const qL = query(collection(db, 'logbooks'), where('student_id', '==', profile.uid));
+    const qL = periodQuery('logbooks', periodId, where('student_id', '==', profile.uid));
     const unsubL = onSnapshot(qL, (snapshot) => {
       setLogbookCount(snapshot.size);
     });
 
-    const qA = query(collection(db, 'attendances'), where('student_id', '==', profile.uid));
+    const qA = periodQuery('attendances', periodId, where('student_id', '==', profile.uid));
     const unsubA = onSnapshot(qA, (snapshot) => {
       setAttendanceCount(snapshot.size);
     });
 
     return () => {
-      unsubscribe();
       unsubL();
       unsubA();
     }
-  }, [profile]);
+  }, [profile?.uid, periodId]);
+
+  useEffect(() => {
+    setPassedMember(null);
+    if (!profile || !hasPassed || !passedPeriodId || passedPeriodId === periodId) return;
+    const q = periodQuery('group_members', passedPeriodId, where('student_id', '==', profile.uid));
+    getDocs(q).then(snap => {
+      const docs = snap.docs.map(d => d.data());
+      setPassedMember(docs.find(d => d.is_grade_published) || null);
+    }).catch(err => console.error('Gagal memuat nilai periode kelulusan', err));
+  }, [profile?.uid, hasPassed, passedPeriodId, periodId]);
+
+  const gradeSource = groupMember?.is_grade_published ? groupMember : passedMember;
+  const passedPeriodName = periods.find(p => p.id === passedPeriodId)?.name;
 
   return (
     <div className="space-y-6">
@@ -97,7 +108,15 @@ export const MahasiswaDashboard = () => {
         </Dialog>
       </div>
 
-      {(profile as any).is_grade_published && (
+      {hasPassed && !memberLoading && !groupMember && passedPeriodId !== periodId && (
+        <Card className="bg-emerald-50 border-emerald-200">
+          <CardContent className="p-5 text-sm text-emerald-900">
+            Anda telah menyelesaikan PBL{passedPeriodName ? ` pada ${passedPeriodName}` : ''}. Tidak ada kegiatan PBL yang perlu Anda ikuti pada {period?.name || 'periode ini'}.
+          </CardContent>
+        </Card>
+      )}
+
+      {gradeSource && (
         <Card className="bg-amber-50 border-amber-200">
           <CardHeader>
             <CardTitle className="text-amber-900">Hasil Penilaian Akhir PBL</CardTitle>
@@ -106,11 +125,11 @@ export const MahasiswaDashboard = () => {
           <CardContent className="flex items-center gap-8">
             <div className="text-center">
                <div className="text-sm font-semibold text-amber-700 uppercase tracking-widest">Nilai Akhir</div>
-               <div className="text-4xl font-extrabold text-amber-950 mt-1">{(profile as any).final_score?.toFixed(2) || '-'}</div>
+               <div className="text-4xl font-extrabold text-amber-950 mt-1">{gradeSource.final_score?.toFixed(2) || '-'}</div>
             </div>
             <div className="text-center border-l border-amber-300 pl-8">
                <div className="text-sm font-semibold text-amber-700 uppercase tracking-widest">Nilai Huruf</div>
-               <div className="text-4xl font-extrabold text-amber-950 mt-1">{(profile as any).letter_grade || '-'}</div>
+               <div className="text-4xl font-extrabold text-amber-950 mt-1">{gradeSource.letter_grade || '-'}</div>
             </div>
           </CardContent>
         </Card>
@@ -148,11 +167,11 @@ export const MahasiswaDashboard = () => {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Status PBL</CardTitle>
+          <CardTitle>Status PBL{period ? ` — ${period.name}` : ''}</CardTitle>
           <CardDescription>Informasi kelompok dan pembimbing Anda.</CardDescription>
         </CardHeader>
         <CardContent>
-          <PendaftaranPBL />
+          {memberLoading ? <div>Memuat data...</div> : <PendaftaranPBL groupMember={groupMember} />}
         </CardContent>
       </Card>
     </div>

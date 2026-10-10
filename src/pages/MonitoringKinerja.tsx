@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { db } from '../firebase';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../contexts/PeriodContext';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Checkbox } from '../components/ui/checkbox';
@@ -22,6 +23,7 @@ interface GroupData {
 }
 
 export const MonitoringKinerja = () => {
+  const { periodId } = usePeriod();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<GroupData[]>([]);
   const [beritaAcara, setBeritaAcara] = useState<any[]>([]);
@@ -32,6 +34,11 @@ export const MonitoringKinerja = () => {
   const [logbooks, setLogbooks] = useState<any[]>([]);
 
   useEffect(() => {
+    if (!periodId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     const fetchData = async () => {
       try {
         const [
@@ -43,13 +50,13 @@ export const MonitoringKinerja = () => {
           membersSnap,
           logbooksSnap
         ] = await Promise.all([
-          getDocs(collection(db, 'pbl_groups')),
+          getDocs(periodQuery('pbl_groups', periodId)),
           getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'berita_acara')),
-          getDocs(collection(db, 'grades')),
-          getDocs(collection(db, 'exam_schedules')),
-          getDocs(collection(db, 'group_members')),
-          getDocs(collection(db, 'logbooks'))
+          getDocs(periodQuery('berita_acara', periodId)),
+          getDocs(periodQuery('grades', periodId)),
+          getDocs(periodQuery('exam_schedules', periodId)),
+          getDocs(periodQuery('group_members', periodId)),
+          getDocs(periodQuery('logbooks', periodId))
         ]);
 
         setGroups(groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as GroupData)));
@@ -67,7 +74,7 @@ export const MonitoringKinerja = () => {
       }
     };
     fetchData();
-  }, []);
+  }, [periodId]);
 
   if (loading) return <div>Memuat data monitoring...</div>;
 

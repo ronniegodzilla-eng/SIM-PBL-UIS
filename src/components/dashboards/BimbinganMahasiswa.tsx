@@ -20,7 +20,6 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
   useEffect(() => {
     if (!profile || !groupMember || groupMember.group_id === 'pending') return;
 
-    const qGroup = query(collection(db, 'pbl_groups'));
     const unsubGroup = onSnapshot(doc(db, 'pbl_groups', groupMember.group_id), (docSnap) => {
       if (docSnap.exists()) {
         setGroupInfo({ id: docSnap.id, ...docSnap.data() });
@@ -66,6 +65,7 @@ export const BimbinganMahasiswa = ({ groupMember }: { groupMember: any }) => {
 
       await setDoc(doc(db, 'pbl_reports', reportId), {
         group_id: groupMember.group_id,
+        period_id: groupMember.period_id,
         report_title: reportTitle,
         report_url: drafUrl,
         status: 'Draft',

@@ -72,6 +72,49 @@ service cloud.firestore {
     }
 
     // ===============================================================
+    // Periode PBL
+    // ===============================================================
+    // Penunjuk periode aktif: settings/active_period { period_id }.
+    // Data operasional membawa period_id. Selain admin, penulisan hanya
+    // diizinkan pada dokumen milik periode aktif — periode yang sudah
+    // ditutup menjadi arsip yang terkunci.
+    function activePeriodId() {
+      return exists(/databases/$(database)/documents/settings/active_period)
+        ? get(/databases/$(database)/documents/settings/active_period).data.get('period_id', null)
+        : null;
+    }
+
+    function inActivePeriod(data) {
+      return 'period_id' in data && data.period_id is string && data.period_id == activePeriodId();
+    }
+
+    // Penulisan dokumen baru (non-admin): harus untuk periode aktif.
+    function canCreateInPeriod() {
+      return isAnyAdmin() || inActivePeriod(request.resource.data);
+    }
+
+    // Pembaruan/penghapusan (non-admin): dokumen milik periode aktif dan
+    // period_id tidak dipindah.
+    function canUpdateInPeriod() {
+      return isAnyAdmin() || (
+        inActivePeriod(resource.data) &&
+        request.resource.data.get('period_id', null) == resource.data.period_id
+      );
+    }
+
+    function canDeleteInPeriod() {
+      return isAnyAdmin() || inActivePeriod(resource.data);
+    }
+
+    // Migrasi oleh admin: hanya menambahkan period_id pada dokumen lama.
+    // Tidak memakai validator domain agar data lama yang tidak lagi sesuai
+    // skema tetap bisa ditandai periodenya.
+    function isAdminPeriodBackfill() {
+      return isAnyAdmin() &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['period_id']);
+    }
+
+    // ===============================================================
     // Domain Validators
     // ===============================================================
 
@@ -91,7 +134,14 @@ service cloud.firestore {
              (!('letter_grade' in data) || data.letter_grade is string) &&
              (!('id_number' in data) || data.id_number is string) &&
              (!('lastLogin' in data) || data.lastLogin is string) &&
+             (!('pbl_status' in data) || data.pbl_status in ['Lulus']) &&
+             (!('pbl_period_id' in data) || data.pbl_period_id is string || data.pbl_period_id == null) &&
              data.createdAt is string;
+    }
+
+    // Field yang hanya boleh diubah admin (nilai & status kelulusan PBL).
+    function protectedUserKeys() {
+      return ['is_grade_published', 'final_score', 'letter_grade', 'pbl_status', 'pbl_period_id'];
     }
 
     function isValidPBLGroup(data) {
@@ -114,6 +164,11 @@ service cloud.firestore {
              data.group_id is string &&
              data.student_id is string &&
              (!('krs_document_url' in data) || data.krs_document_url is string) &&
+             (!('period_id' in data) || data.period_id is string) &&
+             (!('carried_from' in data) || data.carried_from is string) &&
+             (!('is_grade_published' in data) || data.is_grade_published is bool) &&
+             (!('final_score' in data) || data.final_score is number) &&
+             (!('letter_grade' in data) || data.letter_grade is string) &&
              data.status in ['Pending', 'Approved', 'Rejected'] &&
              data.createdAt is string;
     }
@@ -235,15 +290,24 @@ service cloud.firestore {
       allow read: if true;
       // Users can create their own profile (Mahasiswa registers as Pending). Admin can create any. AdminProdi can create staff.
       allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
-        (isOwner(userId) && request.resource.data.role == 'Mahasiswa' && request.resource.data.account_status == 'Pending') ||
+        (isOwner(userId) && request.resource.data.role == 'Mahasiswa' && request.resource.data.account_status == 'Pending' &&
+          !request.resource.data.keys().hasAny(protectedUserKeys())) ||
         isSuperAdmin() ||
         (isAdminProdi() && !(request.resource.data.role in ['Admin', 'AdminProdi']))
       );
       // Only Admin can update roles/status. Users can update their own name.
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
-        isSuperAdmin() ||
-        (isAdminProdi() && !(request.resource.data.role in ['Admin', 'AdminProdi']) && !(resource.data.role in ['Admin', 'AdminProdi'])) ||
-        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.account_status == resource.data.account_status)
+      allow update: if isAuthenticated() && (
+        (isValidUser(request.resource.data) && (
+          isSuperAdmin() ||
+          (isAdminProdi() && !(request.resource.data.role in ['Admin', 'AdminProdi']) && !(resource.data.role in ['Admin', 'AdminProdi'])) ||
+          (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.account_status == resource.data.account_status &&
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedUserKeys()))
+        )) ||
+        // Penandaan kelulusan saat pergantian periode (data lama mungkin
+        // tidak lagi lolos validator lengkap).
+        (isAnyAdmin() && resource.data.role == 'Mahasiswa' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pbl_status', 'pbl_period_id']) &&
+          request.resource.data.get('pbl_status', 'Lulus') in ['Lulus'])
       );
       allow delete: if isSuperAdmin() || (isAdminProdi() && !(resource.data.role in ['Admin', 'AdminProdi']));
     }
@@ -252,7 +316,7 @@ service cloud.firestore {
       // Public read for landing page
       allow read: if true;
       allow create: if isAnyAdmin() && isValidPBLGroup(request.resource.data);
-      allow update: if isValidPBLGroup(request.resource.data) && (
+      allow update: if isAdminPeriodBackfill() || (isValidPBLGroup(request.resource.data) && canUpdateInPeriod() && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tempat_pbl'])) ||
         // A supervisor may set the group leader only for a group they supervise.
@@ -262,19 +326,29 @@ service cloud.firestore {
             ('dsn_pembimbing_id' in resource.data && resource.data.dsn_pembimbing_id == request.auth.uid) ||
             ('pmb_lapangan_id' in resource.data && resource.data.pmb_lapangan_id == request.auth.uid)
           ))
-      );
+      ));
       allow delete: if isAnyAdmin();
     }
 
     match /group_members/{memberId} {
       allow read: if true;
-      // Mahasiswa can apply to a group
+      // Mahasiswa hanya boleh mengajukan diri (Pending) pada periode aktif,
+      // tanpa field nilai. Penempatan & publikasi nilai dilakukan admin.
       allow create: if isActiveUser() && isValidGroupMember(request.resource.data) && (
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid) || isAnyAdmin()
-      );
-      allow update: if isAuthenticated() && isValidGroupMember(request.resource.data) && (
         isAnyAdmin() ||
-        (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status)
+        (isMahasiswa() && request.resource.data.student_id == request.auth.uid &&
+          request.resource.data.status == 'Pending' &&
+          inActivePeriod(request.resource.data) &&
+          !request.resource.data.keys().hasAny(['is_grade_published', 'final_score', 'letter_grade', 'carried_from']))
+      );
+      allow update: if isAuthenticated() && (
+        // Migrasi: tandai periode & salin nilai terpublikasi dari data lama.
+        (isAnyAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['period_id', 'is_grade_published', 'final_score', 'letter_grade'])) ||
+        (isValidGroupMember(request.resource.data) && (
+          isAnyAdmin() ||
+          (isMahasiswa() && resource.data.student_id == request.auth.uid && canUpdateInPeriod() &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['krs_document_url']))
+        ))
       );
       allow delete: if isAnyAdmin();
     }
@@ -285,16 +359,16 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // Students may only file their own entries as 'Pending'; approval is done
       // later by a supervisor. Admin may seed any status.
-      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && (
+      allow create: if isAuthenticated() && isValidLogbook(request.resource.data) && canCreateInPeriod() && (
         isAnyAdmin() ||
         (request.resource.data.student_id == request.auth.uid && request.resource.data.status == 'Pending')
       );
-      allow update: if isAuthenticated() && isValidLogbook(request.resource.data) && (
+      allow update: if isAuthenticated() && (isAdminPeriodBackfill() || (isValidLogbook(request.resource.data) && canUpdateInPeriod() && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid && request.resource.data.status == resource.data.status) ||
         ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['Pending', 'Approved'])
-      );
-      allow delete: if isAnyAdmin() || (isMahasiswa() && resource.data.student_id == request.auth.uid);
+      )));
+      allow delete: if isAnyAdmin() || (isMahasiswa() && resource.data.student_id == request.auth.uid && canDeleteInPeriod());
     }
 
     match /attendances/{attendanceId} {
@@ -303,22 +377,23 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // Students may only file their own attendance as 'Pending'; approval is
       // done later by a supervisor. Admin may seed any status.
-      allow create: if isAuthenticated() && isValidAttendance(request.resource.data)
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && canCreateInPeriod()
         && (request.resource.data.student_id == request.auth.uid || isAnyAdmin())
         && (isAnyAdmin() || !('status' in request.resource.data) || request.resource.data.status == 'Pending')
         && request.resource.data.keys().hasAll(['documentation_url']) && request.resource.data.documentation_url is string && request.resource.data.documentation_url != '';
-      allow update: if isAuthenticated() && isValidAttendance(request.resource.data) && (
+      allow update: if isAuthenticated() && (isAdminPeriodBackfill() || (isValidAttendance(request.resource.data) && canUpdateInPeriod() && (
         isAnyAdmin() ||
         (isMahasiswa() && request.resource.data.student_id == request.auth.uid &&
           (!('status' in resource.data) || request.resource.data.status == resource.data.status)) ||
         ((isPembimbingLapangan() || isDosenPembimbing()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status in ['Pending', 'Approved'])
-      );
+      )));
       allow delete: if isAnyAdmin();
     }
 
     match /exam_schedules/{scheduleId} {
       allow read: if true;
-      allow create, update: if isAnyAdmin() && isValidExamSchedule(request.resource.data);
+      allow create: if isAnyAdmin() && isValidExamSchedule(request.resource.data);
+      allow update: if isAdminPeriodBackfill() || (isAnyAdmin() && isValidExamSchedule(request.resource.data));
       allow delete: if isAnyAdmin();
     }
 
@@ -339,31 +414,34 @@ service cloud.firestore {
              );
     }
 
-    // Deadline pendaftaran ujian (settings/exam_registration):
+    // Deadline pendaftaran ujian, per periode (periods/{id}.exam_registration):
     // mode 'open' = paksa buka, 'closed' = paksa tutup,
     // 'auto' = ikuti jadwal open_at..close_at (Timestamp).
-    // Dokumen belum ada = terbuka (kompatibel dengan perilaku lama).
-    function examRegSettings() {
-      return get(/databases/$(database)/documents/settings/exam_registration).data;
+    // Pengaturan belum ada = terbuka (kompatibel dengan perilaku lama).
+    function examRegSettings(periodId) {
+      return exists(/databases/$(database)/documents/periods/$(periodId))
+        ? get(/databases/$(database)/documents/periods/$(periodId)).data.get('exam_registration', {})
+        : {};
     }
-    function examRegistrationOpen() {
-      return !exists(/databases/$(database)/documents/settings/exam_registration) ||
-        !('mode' in examRegSettings()) ||
-        examRegSettings().mode == 'open' ||
-        (examRegSettings().mode == 'auto' &&
-          (!('open_at' in examRegSettings()) || examRegSettings().open_at == null || request.time >= examRegSettings().open_at) &&
-          (!('close_at' in examRegSettings()) || examRegSettings().close_at == null || request.time < examRegSettings().close_at));
+    function examRegistrationOpen(periodId) {
+      let reg = examRegSettings(periodId);
+      return !('mode' in reg) ||
+        reg.mode == 'open' ||
+        (reg.mode == 'auto' &&
+          (!('open_at' in reg) || reg.open_at == null || request.time >= reg.open_at) &&
+          (!('close_at' in reg) || reg.close_at == null || request.time < reg.close_at));
     }
 
     match /pbl_reports/{reportId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidPBLReport(request.resource.data) && (
+      allow create: if isAuthenticated() && isValidPBLReport(request.resource.data) && canCreateInPeriod() && (
         isAnyAdmin() ||
         (isMahasiswa() && isLeaderOfGroup(request.resource.data.group_id) &&
           (request.resource.data.status == 'Draft' ||
-           (request.resource.data.status == 'Pending' && examRegistrationOpen())))
+           (request.resource.data.status == 'Pending' && examRegistrationOpen(request.resource.data.period_id))))
       );
-      allow update: if isAuthenticated() && isValidPBLReport(request.resource.data)
+      allow update: if isAuthenticated() && (isAdminPeriodBackfill() || (isValidPBLReport(request.resource.data)
+        && canUpdateInPeriod()
         && request.resource.data.group_id == resource.data.group_id && (
         isAnyAdmin() ||
         (isDosenPembimbing() && isSupervisorOfGroup(resource.data.group_id)) ||
@@ -377,14 +455,14 @@ service cloud.firestore {
           (request.resource.data.status == 'Pending' &&
             (('registered_at' in request.resource.data && request.resource.data.registered_at != '') ||
              ('approval_url' in request.resource.data && request.resource.data.approval_url != '')) &&
-            examRegistrationOpen()) ||
+            examRegistrationOpen(resource.data.period_id)) ||
           // Unggah revisi pasca-ujian: fase berbeda, tidak digerbang deadline
           // pendaftaran. (Sekaligus memperbaiki bug lama: transisi ini
           // sebelumnya tertolak karena status dokumen masih 'Approved'.)
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['custom_revisi_urls', 'revisi_status', 'revisi_submitted_at']) &&
             request.resource.data.revisi_status == 'Pending')
         ))
-      );
+      )));
       allow delete: if isAnyAdmin();
     }
 
@@ -410,16 +488,16 @@ service cloud.firestore {
         resource.data.student_id == request.auth.uid ||
         resource.data.evaluator_id == request.auth.uid
       );
-      allow create: if isActiveUser() && isValidGrade(request.resource.data) && canWriteGrade(request.resource.data);
-      allow update: if isActiveUser() && isValidGrade(request.resource.data) && canWriteGrade(request.resource.data) && (resource.data.evaluator_id == request.auth.uid || isSuperAdmin());
+      allow create: if isActiveUser() && isValidGrade(request.resource.data) && canWriteGrade(request.resource.data) && canCreateInPeriod();
+      allow update: if isAdminPeriodBackfill() || (isActiveUser() && isValidGrade(request.resource.data) && canWriteGrade(request.resource.data) && canUpdateInPeriod() && (resource.data.evaluator_id == request.auth.uid || isSuperAdmin()));
       allow delete: if isAnyAdmin();
     }
 
     match /berita_acara/{beritaId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidBeritaAcara(request.resource.data) && (request.resource.data.dosen_id == request.auth.uid || isSuperAdmin());
-      allow update: if isAuthenticated() && isValidBeritaAcara(request.resource.data) && (resource.data.dosen_id == request.auth.uid || isSuperAdmin());
-      allow delete: if isAnyAdmin() || (resource.data.dosen_id == request.auth.uid);
+      allow create: if isAuthenticated() && isValidBeritaAcara(request.resource.data) && canCreateInPeriod() && (request.resource.data.dosen_id == request.auth.uid || isSuperAdmin());
+      allow update: if isAuthenticated() && (isAdminPeriodBackfill() || (isValidBeritaAcara(request.resource.data) && canUpdateInPeriod() && (resource.data.dosen_id == request.auth.uid || isSuperAdmin())));
+      allow delete: if isAnyAdmin() || (resource.data.dosen_id == request.auth.uid && canDeleteInPeriod());
     }
 
     function isValidRubric(data) {
@@ -445,8 +523,19 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
-      allow read: if isAuthenticated();
+      // Penunjuk periode aktif dibaca juga oleh halaman depan (publik).
+      allow read: if isAuthenticated() || settingId == 'active_period';
       allow write: if isAnyAdmin();
+    }
+
+    match /periods/{periodId} {
+      // Publik: nama periode tampil di halaman depan; isinya hanya pengaturan.
+      allow read: if true;
+      allow create, update: if isAnyAdmin() &&
+        request.resource.data.keys().hasAll(['name', 'tahun_ajaran', 'status', 'createdAt']) &&
+        request.resource.data.name is string &&
+        request.resource.data.status in ['Active', 'Closed'];
+      allow delete: if isSuperAdmin();
     }
 
     match /announcements/{announcementId} {

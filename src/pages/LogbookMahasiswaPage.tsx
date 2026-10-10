@@ -1,25 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import React from 'react';
+import { useMyMembership } from '../hooks/useMyMembership';
 import { LogbookAbsensi } from '../components/dashboards/LogbookAbsensi';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 
 export const LogbookMahasiswaPage = () => {
-  const { profile } = useAuth();
-  const [groupMember, setGroupMember] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!profile) return;
-    const q = query(collection(db, 'group_members'), where('student_id', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) setGroupMember({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
-      else setGroupMember(null);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [profile]);
+  const { member: groupMember, loading } = useMyMembership();
 
   if (loading) return <div className="p-8 text-center text-slate-500">Memuat data...</div>;
 

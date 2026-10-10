@@ -1,25 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 export const RekapitulasiPBL = () => {
+  const { periodId } = usePeriod();
   const [grades, setGrades] = useState<any[]>([]);
   const [logbooks, setLogbooks] = useState<any[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsubGrades = onSnapshot(query(collection(db, 'grades')), (snapshot) => {
+    if (!periodId) return;
+    const unsubGrades = onSnapshot(periodQuery('grades', periodId), (snapshot) => {
       setGrades(snapshot.docs.map(doc => doc.data()));
     }, error => handleFirestoreError(error, OperationType.LIST, 'grades'));
 
-    const unsubLogbooks = onSnapshot(query(collection(db, 'logbooks')), (snapshot) => {
+    const unsubLogbooks = onSnapshot(periodQuery('logbooks', periodId), (snapshot) => {
       setLogbooks(snapshot.docs.map(doc => doc.data()));
     }, error => handleFirestoreError(error, OperationType.LIST, 'logbooks'));
 
-    const unsubAttendances = onSnapshot(query(collection(db, 'attendances')), (snapshot) => {
+    const unsubAttendances = onSnapshot(periodQuery('attendances', periodId), (snapshot) => {
       setAttendances(snapshot.docs.map(doc => doc.data()));
     }, error => handleFirestoreError(error, OperationType.LIST, 'attendances'));
 
@@ -33,7 +36,7 @@ export const RekapitulasiPBL = () => {
       unsubAttendances();
       unsubUsers();
     };
-  }, []);
+  }, [periodId]);
 
   // Data for Infographics
   const mahasiswaCount = users.filter(u => u.role === 'Mahasiswa').length;

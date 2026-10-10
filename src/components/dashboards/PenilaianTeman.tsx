@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
+import { periodQuery } from '../../contexts/PeriodContext';
 import { collection, query, where, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -31,6 +32,9 @@ export const PenilaianTeman = ({ groupMember }: { groupMember: any }) => {
       }
     });
 
+    let unsubGrades: (() => void) | null = null;
+    let cancelled = false;
+
     // Get peers in the same group (excluding self)
     const fetchPeers = async () => {
       const qMembers = query(collection(db, 'group_members'), where('group_id', '==', groupMember.group_id), where('status', '==', 'Approved'));
@@ -46,7 +50,7 @@ export const PenilaianTeman = ({ groupMember }: { groupMember: any }) => {
          }
       });
 
-      if (peerIds.length > 0) {
+      if (peerIds.length > 0 && !cancelled) {
         const qStudents = query(collection(db, 'users'), where('role', '==', 'Mahasiswa'));
         const studSnapshot = await getDocs(qStudents);
         const studs: any[] = [];
@@ -55,24 +59,28 @@ export const PenilaianTeman = ({ groupMember }: { groupMember: any }) => {
             studs.push({ ...doc.data(), member_id: memberMap[doc.id].id });
           }
         });
+        if (cancelled) return;
         setPeers(studs);
         
-        // Listen to grades I HAVE GIVEN to them
-        const qGrades = query(collection(db, 'grades'), where('evaluator_id', '==', profile.uid), where('category', '==', 'PeerReview'));
-        const unsubGrades = onSnapshot(qGrades, (gradeSnap) => {
+        // Listen to grades I HAVE GIVEN to them (periode ini saja)
+        const qGrades = periodQuery('grades', groupMember.period_id, where('evaluator_id', '==', profile.uid), where('category', '==', 'PeerReview'));
+        unsubGrades = onSnapshot(qGrades, (gradeSnap) => {
             const gradesMap: any = {};
             gradeSnap.forEach(d => {
               const grad = d.data();
-              gradesMap[grad.student_id] = { score: grad.score, detail: grad.rubric_scores };
+              gradesMap[grad.student_id] = { id: d.id, score: grad.score, detail: grad.rubric_scores };
             });
             setGrades(gradesMap);
         });
-        return () => unsubGrades();
       }
     };
     fetchPeers();
 
-    return () => unsubRubric();
+    return () => {
+      cancelled = true;
+      unsubRubric();
+      if (unsubGrades) unsubGrades();
+    };
   }, [profile, groupMember]);
 
   const handleScoreChange = (critId: string, val: string) => {
@@ -101,9 +109,13 @@ export const PenilaianTeman = ({ groupMember }: { groupMember: any }) => {
     try {
       setLoading(true);
 
-      const gradeId = `${selectedStudent.uid}_Peer_${profile.uid}`;
+      // Pakai ulang dokumen yang sudah ada pada periode ini (termasuk data
+      // lama berformat ID tanpa periode); dokumen baru diberi prefiks periode
+      // agar tidak menimpa nilai periode sebelumnya.
+      const gradeId = grades[selectedStudent.uid]?.id || `${groupMember.period_id}_${selectedStudent.uid}_Peer_${profile.uid}`;
       await setDoc(doc(db, 'grades', gradeId), {
         student_id: selectedStudent.uid,
+        period_id: groupMember.period_id,
         group_member_id: selectedStudent.member_id,
         evaluator_id: profile.uid,
         category: 'PeerReview',

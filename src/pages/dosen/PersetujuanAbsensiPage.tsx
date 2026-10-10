@@ -2,27 +2,29 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { PersetujuanLogbook } from '../../components/dashboards/PersetujuanLogbook';
 
 export const PersetujuanAbsensiPage = () => {
   const { profile } = useAuth();
+  const { periodId } = usePeriod();
   const [groups, setGroups] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !periodId) return;
     
     let unsubs: (() => void)[] = [];
     
     if (profile.role === 'PembimbingLapangan') {
-      const qGroups = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      const qGroups = periodQuery('pbl_groups', periodId, where('pmb_lapangan_id', '==', profile.uid));
       unsubs.push(onSnapshot(qGroups, (snapshot) => {
         const g: any[] = [];
         snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
         setGroups(g);
       }));
     } else if (profile.role === 'Dosen') {
-      const qDpl = query(collection(db, 'pbl_groups'), where('dsn_pembimbing_id', '==', profile.uid));
-      const qPl = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      const qDpl = periodQuery('pbl_groups', periodId, where('dsn_pembimbing_id', '==', profile.uid));
+      const qPl = periodQuery('pbl_groups', periodId, where('pmb_lapangan_id', '==', profile.uid));
       
       let dplGroups: any[] = [];
       let plGroups: any[] = [];
@@ -46,7 +48,7 @@ export const PersetujuanAbsensiPage = () => {
         updateGroups();
       }));
     } else {
-      const qGroups = query(collection(db, 'pbl_groups'));
+      const qGroups = periodQuery('pbl_groups', periodId);
       unsubs.push(onSnapshot(qGroups, (snapshot) => {
         const g: any[] = [];
         snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
@@ -55,7 +57,7 @@ export const PersetujuanAbsensiPage = () => {
     }
     
     return () => unsubs.forEach(fn => fn());
-  }, [profile]);
+  }, [profile, periodId]);
 
   return (
     <div className="space-y-6">

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { collection, query, getDocs, where, doc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -15,6 +16,7 @@ import { Download } from 'lucide-react';
 import { generateBeritaAcaraPdf, beritaAcaraTitle } from '../../lib/beritaAcaraPdf';
 
 export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
+  const { periodId } = usePeriod();
   const { profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
@@ -51,8 +53,8 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   useEffect(() => {
-    if (!profile) return;
-    const qBerita = query(collection(db, 'berita_acara'), where('dosen_id', '==', profile.uid));
+    if (!profile || !periodId) return;
+    const qBerita = periodQuery('berita_acara', periodId, where('dosen_id', '==', profile.uid));
     const unsub = onSnapshot(qBerita, snap => {
       const b: any[] = [];
       snap.forEach(doc => b.push({ id: doc.id, ...doc.data() }));
@@ -60,7 +62,7 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
     }, error => handleFirestoreError(error, OperationType.LIST, 'berita_acara'));
     
     return () => unsub();
-  }, [profile]);
+  }, [profile, periodId]);
 
   const handleOpenDialog = async (group: any, type: string, existingDocId?: string) => {
     try {
@@ -217,6 +219,7 @@ export const BeritaAcaraDosen = ({ groups }: { groups: any[] }) => {
 
       const payload: any = {
         group_id: selectedGroup.id,
+        period_id: selectedGroup.period_id || periodId,
         dosen_id: profile.uid,
         type: selectedType,
         date,

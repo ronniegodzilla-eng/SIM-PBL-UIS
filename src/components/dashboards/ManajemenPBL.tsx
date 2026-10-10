@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { UserProfile } from '../../contexts/AuthContext';
 import { Button } from '../ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -16,6 +17,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export const ManajemenPBL = () => {
+  const { periodId, period, periods } = usePeriod();
   const [groups, setGroups] = useState<any[]>([]);
   const [dosenPembimbing, setDosenPembimbing] = useState<UserProfile[]>([]);
   const [pembimbingLapangan, setPembimbingLapangan] = useState<UserProfile[]>([]);
@@ -32,8 +34,13 @@ export const ManajemenPBL = () => {
   const [memberToRemove, setMemberToRemove] = useState<any>(null);
 
   useEffect(() => {
+    if (!periodId) {
+      setAllGroupMembers([]);
+      setGroups([]);
+      return;
+    }
     // Listen for all group members
-    const qAllMembers = query(collection(db, 'group_members'));
+    const qAllMembers = periodQuery('group_members', periodId);
     const unsubAllMembers = onSnapshot(qAllMembers, (snapshot) => {
       const members: any[] = [];
       snapshot.forEach((doc) => members.push({ id: doc.id, ...doc.data() }));
@@ -41,7 +48,7 @@ export const ManajemenPBL = () => {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'group_members'));
 
     // Listen for groups
-    const qGroups = query(collection(db, 'pbl_groups'));
+    const qGroups = periodQuery('pbl_groups', periodId);
     const unsubGroups = onSnapshot(qGroups, (snapshot) => {
       const g: any[] = [];
       snapshot.forEach((doc) => g.push({ id: doc.id, ...doc.data() }));
@@ -79,7 +86,7 @@ export const ManajemenPBL = () => {
       unsubDosen();
       unsubPL();
     };
-  }, []);
+  }, [periodId]);
 
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,11 +94,16 @@ export const ManajemenPBL = () => {
       toast.error('Pilih Program Studi untuk kelompok ini');
       return;
     }
+    if (!periodId) {
+      toast.error('Belum ada periode PBL yang aktif. Aktifkan periode di Manajemen Periode.');
+      return;
+    }
     try {
       setIsCreatingGroup(true);
       const groupId = `group_${Date.now()}`;
       
       await setDoc(doc(db, 'pbl_groups', groupId), {
+        period_id: periodId,
         group_name: newGroup.group_name,
         dsn_pembimbing_id: newGroup.dsn_pembimbing_id,
         pmb_lapangan_id: newGroup.pmb_lapangan_id,
@@ -184,9 +196,10 @@ export const ManajemenPBL = () => {
   };
 
   const handleAddMahasiswaToGroup = async (groupId: string, studentId: string) => {
-    if (!studentId) return;
+    if (!studentId || !periodId) return;
     try {
-      // Check if they already have a group_members doc
+      // Keanggotaan dicari pada periode ini saja (allGroupMembers sudah
+      // dibatasi periode) — keanggotaan periode lama tidak disentuh.
       const existingMember = allGroupMembers.find(m => m.student_id === studentId);
       
       if (existingMember) {
@@ -197,8 +210,9 @@ export const ManajemenPBL = () => {
         });
       } else {
         // Create new
-        const memberId = `member_${studentId}`;
+        const memberId = `member_${periodId}_${studentId}`;
         await setDoc(doc(db, 'group_members', memberId), {
+          period_id: periodId,
           group_id: groupId,
           student_id: studentId,
           status: 'Approved',
@@ -230,11 +244,22 @@ export const ManajemenPBL = () => {
     }
   };
 
-  // Get available mahasiswa (not in any group)
+  // Mahasiswa yang dapat dimasukkan ke kelompok periode ini: belum punya
+  // kelompok di periode ini dan belum dinyatakan lulus PBL pada periode
+  // sebelumnya. Mahasiswa yang belum lulus/tidak berprogres otomatis
+  // tetap muncul di sini pada periode berikutnya.
   const availableMahasiswa = allMahasiswa.filter(mhs => {
     const memberDoc = allGroupMembers.find(m => m.student_id === mhs.uid);
+    const passedEarlier = (mhs as any).pbl_status === 'Lulus' && (mhs as any).pbl_period_id !== periodId;
+    if (passedEarlier) return false;
     return !memberDoc || memberDoc.status !== 'Approved' || memberDoc.group_id === 'pending';
   });
+
+  // Label "Mengulang" untuk mahasiswa yang dibawa dari periode sebelumnya.
+  const carriedFromName = (uid: string) => {
+    const from = allGroupMembers.find(m => m.student_id === uid)?.carried_from;
+    return from ? (periods.find(p => p.id === from)?.name || from) : null;
+  };
 
   const handleExportGroupsToExcel = () => {
     const dataToExport = groups.map(g => {
@@ -257,7 +282,7 @@ export const ManajemenPBL = () => {
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Daftar_Kelompok_PBL');
-    XLSX.writeFile(workbook, 'Daftar_Kelompok_PBL.xlsx');
+    XLSX.writeFile(workbook, `Daftar_Kelompok_PBL${period ? `_${period.id}` : ''}.xlsx`);
   };
 
   const handleExportGroupsToPdf = () => {
@@ -265,6 +290,7 @@ export const ManajemenPBL = () => {
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
     doc.text("DAFTAR KELOMPOK PRAKTIK BELAJAR LAPANGAN", 148, 20, { align: "center" });
+    if (period) doc.text(period.name.toUpperCase(), 148, 26, { align: "center" });
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
@@ -293,14 +319,14 @@ export const ManajemenPBL = () => {
       headStyles: { fillColor: [41, 128, 185] }
     });
 
-    doc.save('Daftar_Kelompok_PBL.pdf');
+    doc.save(`Daftar_Kelompok_PBL${period ? `_${period.id}` : ''}.pdf`);
   };
 
   return (
     <div className="space-y-8">
       <div>
         <div className="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
-          <h3 className="text-lg font-semibold">Daftar Kelompok PBL</h3>
+          <h3 className="text-lg font-semibold">Daftar Kelompok PBL{period ? ` — ${period.name}` : ''}</h3>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={handleExportGroupsToExcel}>
               <Download className="w-4 h-4 mr-2" /> Excel
@@ -548,7 +574,9 @@ export const ManajemenPBL = () => {
                                             <SelectItem value="none" disabled>Tidak ada mahasiswa ditemukan</SelectItem>
                                           ) : (
                                             filteredAvailableForGroup.map(mhs => (
-                                              <SelectItem key={mhs.uid} value={mhs.uid}>{mhs.name}</SelectItem>
+                                              <SelectItem key={mhs.uid} value={mhs.uid}>
+                                                {mhs.name}{carriedFromName(mhs.uid) ? ` — mengulang (${carriedFromName(mhs.uid)})` : ''}
+                                              </SelectItem>
                                             ))
                                           )}
                                         </SelectContent>

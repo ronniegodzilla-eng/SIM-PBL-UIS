@@ -71,7 +71,8 @@ export const AdminDashboard = () => {
         'pbl_reports',
         'exam_schedules',
         'berita_acara',
-        'grades'
+        'grades',
+        'periods'
       ];
 
       for (const collName of collectionsToClear) {
@@ -79,6 +80,8 @@ export const AdminDashboard = () => {
         const promises = snapshot.docs.map(d => deleteDoc(doc(db, collName, d.id)));
         await Promise.all(promises);
       }
+
+      await deleteDoc(doc(db, 'settings', 'active_period'));
 
       const usersSnapshot = await getDocs(collection(db, 'users'));
       const userDeletePromises = usersSnapshot.docs.map(document => {
@@ -162,7 +165,7 @@ export const AdminDashboard = () => {
             <DialogHeader>
               <DialogTitle className="text-red-600">Peringatan: Reset Sistem</DialogTitle>
               <DialogDescription>
-                Tindakan ini akan <strong>menghapus SEMUA data</strong> (Mahasiswa, Dosen, Kelompok, Logbook, Nilai) kecuali akun Admin. Tindakan ini tidak dapat dibatalkan.
+                Tindakan ini akan <strong>menghapus SEMUA data</strong> (Mahasiswa, Dosen, Kelompok, Logbook, Nilai, seluruh Periode beserta arsipnya) kecuali akun Admin. Tindakan ini tidak dapat dibatalkan. Untuk memulai PBL tahun berikutnya, gunakan <strong>Manajemen Periode</strong> — bukan reset.
               </DialogDescription>
             </DialogHeader>
             <div className="py-4">

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { collection, query, where, doc, onSnapshot, getDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, query, where, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
@@ -9,66 +8,56 @@ import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { toast } from 'sonner';
 
-export const PendaftaranPBL = () => {
-  const { profile } = useAuth();
-  const [groupMember, setGroupMember] = useState<any>(null);
+// Keanggotaan diambil oleh induk (useMyMembership) — sudah dibatasi pada
+// periode aktif, jadi kelompok periode lama tidak ikut tampil.
+export const PendaftaranPBL = ({ groupMember }: { groupMember: any }) => {
   const [groupInfo, setGroupInfo] = useState<any>({});
-  const [loading, setLoading] = useState(true);
   const [isEditingTempat, setIsEditingTempat] = useState(false);
   const [newTempat, setNewTempat] = useState('');
 
   useEffect(() => {
-    if (!profile) return;
+    setGroupInfo({});
+    if (!groupMember || !groupMember.group_id || groupMember.group_id === 'pending') return;
+    let cancelled = false;
 
-    const q = query(collection(db, 'group_members'), where('student_id', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      if (!snapshot.empty) {
-        const memberData = snapshot.docs[0].data();
-        setGroupMember(memberData);
-        
-        if (memberData.group_id && memberData.group_id !== 'pending') {
-          try {
-            const groupDoc = await getDoc(doc(db, 'pbl_groups', memberData.group_id));
-            if (groupDoc.exists()) {
-              const gData = groupDoc.data();
-              // get names
-              const resObj: any = { id: groupDoc.id, ...gData };
-              
-              if (gData.dsn_pembimbing_id) {
-                 const dDoc = await getDoc(doc(db, 'users', gData.dsn_pembimbing_id));
-                 if (dDoc.exists()) resObj.dsn_pembimbing_name = dDoc.data().name;
-              }
-              if (gData.pmb_lapangan_id) {
-                 const plDoc = await getDoc(doc(db, 'users', gData.pmb_lapangan_id));
-                 if (plDoc.exists()) resObj.pmb_lapangan_name = plDoc.data().name;
-              }
+    const loadGroup = async () => {
+      try {
+        const groupDoc = await getDoc(doc(db, 'pbl_groups', groupMember.group_id));
+        if (!groupDoc.exists()) return;
+        const gData = groupDoc.data();
+        // get names
+        const resObj: any = { id: groupDoc.id, ...gData };
 
-              // Get all members
-              const mQ = query(collection(db, 'group_members'), where('group_id', '==', memberData.group_id), where('status', '==', 'Approved'));
-              const mSnap = await getDocs(mQ);
-              const mNames: string[] = [];
-              for (const mD of mSnap.docs) {
-                 const stId = mD.data().student_id;
-                 const stDoc = await getDoc(doc(db, 'users', stId));
-                 if (stDoc.exists()) {
-                    mNames.push(stDoc.data().name);
-                 }
-              }
-              resObj.members = mNames;
-              setGroupInfo(resObj);
-            }
-          } catch (error) {
-            console.error('Error fetching group info', error);
-          }
+        if (gData.dsn_pembimbing_id) {
+           const dDoc = await getDoc(doc(db, 'users', gData.dsn_pembimbing_id));
+           if (dDoc.exists()) resObj.dsn_pembimbing_name = dDoc.data().name;
         }
-      } else {
-        setGroupMember(null);
-      }
-      setLoading(false);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'group_members'));
+        if (gData.pmb_lapangan_id) {
+           const plDoc = await getDoc(doc(db, 'users', gData.pmb_lapangan_id));
+           if (plDoc.exists()) resObj.pmb_lapangan_name = plDoc.data().name;
+        }
 
-    return () => unsubscribe();
-  }, [profile]);
+        // Get all members
+        const mQ = query(collection(db, 'group_members'), where('group_id', '==', groupMember.group_id), where('status', '==', 'Approved'));
+        const mSnap = await getDocs(mQ);
+        const mNames: string[] = [];
+        for (const mD of mSnap.docs) {
+           const stId = mD.data().student_id;
+           const stDoc = await getDoc(doc(db, 'users', stId));
+           if (stDoc.exists()) {
+              mNames.push(stDoc.data().name);
+           }
+        }
+        resObj.members = mNames;
+        if (!cancelled) setGroupInfo(resObj);
+      } catch (error) {
+        console.error('Error fetching group info', error);
+      }
+    };
+
+    loadGroup();
+    return () => { cancelled = true; };
+  }, [groupMember?.group_id, groupMember?.status]);
 
   const handleUpdateTempatPbl = async () => {
     if (!groupInfo.id) return;
@@ -84,8 +73,6 @@ export const PendaftaranPBL = () => {
       toast.error('Gagal memperbarui tempat PBL.');
     }
   };
-
-  if (loading) return <div>Memuat data...</div>;
 
   if (groupMember && groupMember.status === 'Approved') {
     return (

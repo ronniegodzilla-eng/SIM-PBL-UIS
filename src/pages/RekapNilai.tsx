@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, getDocs, where, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, where, doc, updateDoc } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../contexts/PeriodContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Button } from '../components/ui/button';
@@ -18,6 +19,7 @@ type SortConfig = { key: string, direction: 'asc' | 'desc' } | null;
 
 export const RekapNilai = () => {
   const { profile } = useAuth();
+  const { periodId, period } = usePeriod();
   const [students, setStudents] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
@@ -39,10 +41,11 @@ export const RekapNilai = () => {
     return "D";
   };
 
-  const [isEditActive, setIsEditActive] = useState(false);
+  // Saklar "edit nilai" berlaku per periode.
+  const isEditActive = !!period?.is_edit_active;
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !periodId) return;
 
     const qStudents = query(collection(db, 'users'), where('role', '==', 'Mahasiswa'));
     const unsubStudents = onSnapshot(qStudents, (snapshot) => {
@@ -51,21 +54,21 @@ export const RekapNilai = () => {
       setStudents(s);
     });
 
-    const qGroups = query(collection(db, 'pbl_groups'));
+    const qGroups = periodQuery('pbl_groups', periodId);
     const unsubGroups = onSnapshot(qGroups, (snapshot) => {
       const g: any[] = [];
       snapshot.forEach(doc => g.push({ id: doc.id, ...doc.data() }));
       setGroups(g);
     });
 
-    const qMembers = query(collection(db, 'group_members'), where('status', '==', 'Approved'));
+    const qMembers = periodQuery('group_members', periodId, where('status', '==', 'Approved'));
     const unsubMembers = onSnapshot(qMembers, (snapshot) => {
       const m: any[] = [];
       snapshot.forEach(doc => m.push({ id: doc.id, ...doc.data() }));
       setGroupMembers(m);
     });
 
-    const qGrades = query(collection(db, 'grades'));
+    const qGrades = periodQuery('grades', periodId);
     const unsubGrades = onSnapshot(qGrades, (snapshot) => {
        const gradesMap: any = {};
        snapshot.forEach(doc => {
@@ -113,15 +116,9 @@ export const RekapNilai = () => {
        setGrades(gradesMap);
     });
 
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'main'), (doc) => {
-      if (doc.exists()) {
-        setIsEditActive(doc.data().is_edit_active || false);
-      }
-    });
-
     // Jadwal ujian (untuk tahu penguji resmi tiap kelompok) & peta nama
     // pengguna (untuk menyebut siapa yang belum mengisi nilai penguji).
-    const unsubExam = onSnapshot(collection(db, 'exam_schedules'), (snap) => {
+    const unsubExam = onSnapshot(periodQuery('exam_schedules', periodId), (snap) => {
       setExamSchedules(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     const unsubAllUsers = onSnapshot(collection(db, 'users'), (snap) => {
@@ -135,11 +132,10 @@ export const RekapNilai = () => {
       unsubGroups();
       unsubMembers();
       unsubGrades();
-      unsubSettings();
       unsubExam();
       unsubAllUsers();
     };
-  }, [profile]);
+  }, [profile, periodId]);
 
   if (profile?.role !== 'Admin' && profile?.role !== 'AdminProdi' && profile?.role !== 'Dosen' && profile?.role !== 'PembimbingLapangan') {
     return <div className="p-8 text-center">Akses Ditolak</div>;
@@ -148,26 +144,36 @@ export const RekapNilai = () => {
   const isAdmin = profile?.role === 'Admin' || profile?.role === 'AdminProdi';
 
   const filteredStudents = students.filter(student => {
+    // Hanya mahasiswa yang tergabung dalam kelompok pada periode ini.
+    const member = groupMembers.find(m => m.student_id === student.id);
+    const group = groups.find(g => g.id === member?.group_id);
+    if (!group) return false;
     if (isAdmin) return true;
     // Pembimbing (DPL maupun Pembimbing Lapangan) melihat mahasiswa dari
     // kelompok yang dibimbingnya saja.
-    const member = groupMembers.find(m => m.student_id === student.id);
-    const group = groups.find(g => g.id === member?.group_id);
-    return group && (group.dsn_pembimbing_id === profile.uid || group.pmb_lapangan_id === profile.uid);
+    return group.dsn_pembimbing_id === profile.uid || group.pmb_lapangan_id === profile.uid;
   });
 
   const handleToggleEdit = async (checked: boolean) => {
+    if (!periodId) return;
     try {
-      await setDoc(doc(db, 'settings', 'main'), { is_edit_active: checked }, { merge: true });
+      await updateDoc(doc(db, 'periods', periodId), { is_edit_active: checked });
       toast.success(checked ? 'Edit nilai diaktifkan' : 'Edit nilai dinonaktifkan');
     } catch (error) {
       toast.error('Gagal mengubah pengaturan edit nilai');
     }
   };
 
-  const handlePublishNilai = async (studentId: string, finalScore: number, letterGrade: string) => {
+  // Nilai akhir dipublikasikan pada dokumen keanggotaan periode ini, bukan
+  // pada profil pengguna — agar nilai mahasiswa yang mengulang tidak tertimpa
+  // dan mahasiswa tidak dapat mengubah nilainya sendiri.
+  const handlePublishNilai = async (memberId: string | undefined, finalScore: number, letterGrade: string) => {
+    if (!memberId) {
+      toast.error('Data keanggotaan kelompok mahasiswa tidak ditemukan.');
+      return;
+    }
     try {
-      await updateDoc(doc(db, 'users', studentId), {
+      await updateDoc(doc(db, 'group_members', memberId), {
         is_grade_published: true,
         final_score: finalScore,
         letter_grade: letterGrade
@@ -221,6 +227,8 @@ export const RekapNilai = () => {
 
       return {
         ...student,
+        member_id: member?.id,
+        is_grade_published: !!member?.is_grade_published,
         group_name: group ? group.group_name : '-',
         prodi: group?.prodi || student.prodi || 'Tidak Spesifik',
         sosialisasiScore,
@@ -276,7 +284,7 @@ export const RekapNilai = () => {
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap_Nilai');
-    XLSX.writeFile(workbook, 'Rekapitulasi_Nilai_PBL.xlsx');
+    XLSX.writeFile(workbook, `Rekapitulasi_Nilai_PBL${period ? `_${period.id}` : ''}.xlsx`);
   };
 
   const handleExportPdf = () => {
@@ -288,6 +296,7 @@ export const RekapNilai = () => {
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
+    if (period) doc.text(period.name.toUpperCase(), 148, 26, { align: "center" });
     if (!isAdmin) {
       doc.text(`Dosen Pembimbing: ${profile?.name}`, 14, 30);
     }
@@ -316,7 +325,7 @@ export const RekapNilai = () => {
       headStyles: { fillColor: [41, 128, 185] }
     });
     
-    doc.save(`Rekapitulasi_Nilai_PBL${isAdmin ? '' : '_' + profile?.name}.pdf`);
+    doc.save(`Rekapitulasi_Nilai_PBL${period ? `_${period.id}` : ''}${isAdmin ? '' : '_' + profile?.name}.pdf`);
   };
 
   const isDosen = profile?.role === 'Dosen';
@@ -435,7 +444,7 @@ export const RekapNilai = () => {
                         {student.is_grade_published ? (
                           <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-1 rounded">Published</span>
                         ) : (
-                          <Button size="sm" variant="outline" onClick={() => handlePublishNilai(student.id, student.finalScore, student.letterGrade)}>
+                          <Button size="sm" variant="outline" onClick={() => handlePublishNilai(student.member_id, student.finalScore, student.letterGrade)}>
                               Publish
                           </Button>
                         )}

@@ -60,7 +60,7 @@ function doPost(e) {
     }
     // ====================================
 
-    var folder = DriveApp.getFolderById('ID_FOLDER_DRIVE_ANDA');
+    var folder = getTargetFolder(body.folder);
     var blob = Utilities.newBlob(
       Utilities.base64Decode(body.base64), body.mimeType, body.filename
     );
@@ -73,6 +73,26 @@ function doPost(e) {
   }
 }
 
+// Berkas disimpan di subfolder per periode PBL (mis. "PBL 2026/2027") di
+// dalam folder utama. Klien mengirim nama periode di field `folder`;
+// bila kosong (klien lama), berkas masuk ke folder utama seperti dulu.
+var ROOT_FOLDER_ID = 'ID_FOLDER_DRIVE_ANDA';
+
+function getTargetFolder(name) {
+  var root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  if (!name) return root;
+  var safe = String(name).replace(/[\\/:*?"<>|]/g, '-').slice(0, 100);
+  // Kunci agar dua unggahan bersamaan tidak membuat folder kembar.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var it = root.getFoldersByName(safe);
+    return it.hasNext() ? it.next() : root.createFolder(safe);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function jsonOutput(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -82,9 +102,10 @@ function jsonOutput(obj) {
 Setelah mengubah script: **Deploy → Manage deployments → Edit → New version**
 agar versi baru aktif di URL yang sama.
 
-Kompatibilitas: sebelum script diperbarui, field `idToken` ekstra hanya
-diabaikan — upload tetap berjalan. Verifikasi baru berlaku begitu script
-versi baru di-deploy.
+Kompatibilitas: sebelum script diperbarui, field `idToken` dan `folder`
+ekstra hanya diabaikan — upload tetap berjalan (semua berkas masuk folder
+utama). Verifikasi token dan pemisahan folder per periode berlaku begitu
+script versi baru di-deploy.
 
 ## 3. Reset Password Langsung oleh Admin (`api/admin-reset-password.ts`)
 

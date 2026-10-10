@@ -196,7 +196,12 @@ export const ManajemenUser = () => {
       batch.update(doc(db, 'users', newUid), { 
         role: userToMigrate.role, 
         account_status: userToMigrate.account_status,
-        name: userToMigrate.name
+        name: userToMigrate.name,
+        // Status kelulusan PBL lintas periode ikut dipindahkan.
+        ...((userToMigrate as any).pbl_status ? {
+          pbl_status: (userToMigrate as any).pbl_status,
+          pbl_period_id: (userToMigrate as any).pbl_period_id || null
+        } : {})
       });
 
       await batch.commit();

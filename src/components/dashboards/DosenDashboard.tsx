@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -16,6 +17,7 @@ import { toast } from 'sonner';
 
 export const DosenDashboard = ({ role }: { role: string }) => {
   const { profile } = useAuth();
+  const { periodId } = usePeriod();
   const [dplGroups, setDplGroups] = useState<any[]>([]);
   const [plGroups, setPlGroups] = useState<any[]>([]);
   const [examSchedules, setExamSchedules] = useState<any[]>([]);
@@ -43,11 +45,16 @@ export const DosenDashboard = ({ role }: { role: string }) => {
 
   useEffect(() => {
     if (!profile) return;
+    if (!periodId) {
+      setDplGroups([]);
+      setPlGroups([]);
+      return;
+    }
 
     let unsubs: (() => void)[] = [];
 
     if (role === 'DosenPembimbing' || role === 'Dosen') {
-      const qDpl = query(collection(db, 'pbl_groups'), where('dsn_pembimbing_id', '==', profile.uid));
+      const qDpl = periodQuery('pbl_groups', periodId, where('dsn_pembimbing_id', '==', profile.uid));
       const uDpl = onSnapshot(qDpl, (snapshot) => {
         setDplGroups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }, (error) => handleFirestoreError(error, OperationType.LIST, 'pbl_groups'));
@@ -55,7 +62,7 @@ export const DosenDashboard = ({ role }: { role: string }) => {
     }
 
     if (role === 'PembimbingLapangan' || role === 'Dosen') {
-      const qPl = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      const qPl = periodQuery('pbl_groups', periodId, where('pmb_lapangan_id', '==', profile.uid));
       const uPl = onSnapshot(qPl, (snapshot) => {
         setPlGroups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }, (error) => handleFirestoreError(error, OperationType.LIST, 'pbl_groups'));
@@ -65,17 +72,17 @@ export const DosenDashboard = ({ role }: { role: string }) => {
     return () => {
       unsubs.forEach(u => u());
     };
-  }, [profile, role]);
+  }, [profile, role, periodId]);
 
   // Jadwal ujian yang relevan: sebagai Dosen Penguji ATAU sebagai pembimbing
   // (DPL/PL) dari kelompok yang dijadwalkan. Dokumen exam_schedules tidak
   // punya field pembimbing_id — relasi pembimbing ada di dokumen kelompok,
   // jadi jadwal kelompok bimbingan diturunkan dari dplGroups/plGroups.
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !periodId) return;
 
     const supervisedIds = new Set([...dplGroups, ...plGroups].map(g => g.id));
-    const unsubExam = onSnapshot(collection(db, 'exam_schedules'), (snapshot) => {
+    const unsubExam = onSnapshot(periodQuery('exam_schedules', periodId), (snapshot) => {
       const list: any[] = [];
       snapshot.forEach(d => {
         const data: any = { id: d.id, ...d.data() };
@@ -88,16 +95,17 @@ export const DosenDashboard = ({ role }: { role: string }) => {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'exam_schedules'));
 
     return () => unsubExam();
-  }, [profile, dplGroups, plGroups]);
+  }, [profile, dplGroups, plGroups, periodId]);
 
   useEffect(() => {
+    if (!periodId) return;
     const unsubStudents = onSnapshot(query(collection(db, 'users'), where('role', '==', 'Mahasiswa')), (snapshot) => {
       setAllStudents(snapshot.docs.map(doc => doc.data()));
     });
-    const unsubMembers = onSnapshot(collection(db, 'group_members'), (snapshot) => {
+    const unsubMembers = onSnapshot(periodQuery('group_members', periodId), (snapshot) => {
        setAllMembers(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
     });
-    const unsubAllGroups = onSnapshot(collection(db, 'pbl_groups'), (snapshot) => {
+    const unsubAllGroups = onSnapshot(periodQuery('pbl_groups', periodId), (snapshot) => {
        setAllGroups(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()})));
     });
     return () => {
@@ -105,18 +113,18 @@ export const DosenDashboard = ({ role }: { role: string }) => {
       unsubMembers();
       unsubAllGroups();
     }
-  }, []);
+  }, [periodId]);
 
   useEffect(() => {
     const allGroups = [...plGroups, ...dplGroups];
-    if (allGroups.length === 0) {
+    if (allGroups.length === 0 || !periodId) {
       setPendingLogbooks(0);
       setPendingAttendances(0);
       return;
     }
 
     const groupIds = allGroups.map(g => g.id);
-    const qMembers = query(collection(db, 'group_members'));
+    const qMembers = periodQuery('group_members', periodId);
     
     let currentUnsubLogs: (() => void) | null = null;
     let currentUnsubAtts: (() => void) | null = null;
@@ -145,7 +153,7 @@ export const DosenDashboard = ({ role }: { role: string }) => {
         return;
       }
 
-      const qLogbooks = query(collection(db, 'logbooks'), where('status', '==', 'Pending'));
+      const qLogbooks = periodQuery('logbooks', periodId, where('status', '==', 'Pending'));
       currentUnsubLogs = onSnapshot(qLogbooks, (snapLogs) => {
         let count = 0;
         snapLogs.forEach((lDoc) => {
@@ -154,7 +162,7 @@ export const DosenDashboard = ({ role }: { role: string }) => {
         setPendingLogbooks(count);
       }, (error) => handleFirestoreError(error, OperationType.LIST, 'logbooks'));
 
-      const qAttendances = query(collection(db, 'attendances'), where('status', '==', 'Pending'));
+      const qAttendances = periodQuery('attendances', periodId, where('status', '==', 'Pending'));
       currentUnsubAtts = onSnapshot(qAttendances, (snapAtts) => {
         let count = 0;
         snapAtts.forEach((aDoc) => {
@@ -169,7 +177,7 @@ export const DosenDashboard = ({ role }: { role: string }) => {
       if (currentUnsubLogs) currentUnsubLogs();
       if (currentUnsubAtts) currentUnsubAtts();
     };
-  }, [plGroups, dplGroups]);
+  }, [plGroups, dplGroups, periodId]);
 
   const totalGroups = dplGroups.length + plGroups.length;
 

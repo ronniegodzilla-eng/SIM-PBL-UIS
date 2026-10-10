@@ -48,7 +48,7 @@ Mengatur jadwal, ploting ruangan, dan menugaskan dosen penguji untuk ujian akhir
 
 Atur komponen-komponen penilaian yang akan digunakan oleh dosen, pembimbing lapangan, maupun untuk penilaian teman (peer).
 1. Buka menu **[Manajemen Rubrik](/manajemen-rubrik)**.
-2. Anda bisa memperbarui bobot, menambahkan kriteria, atau mengatur ulang struktur rubrik penilaian yang berlaku untuk periode PBL saat ini.
+2. Anda bisa memperbarui bobot, menambahkan kriteria, atau mengatur ulang struktur rubrik penilaian. Rubrik berlaku untuk semua periode — ubah rubrik setelah nilai periode sebelumnya selesai direkap.
 
 ---
 
@@ -58,6 +58,22 @@ Untuk mengawasi kegiatan secara terpusat, admin diberikan akses untuk melihat ha
 *   **[Rekap Nilai](/rekap-nilai):** Melihat rekapitulasi nilai akhir dari seluruh komponen (Pembimbing, Penguji, Pembimbing Lapangan, dan Peer Assessment). Anda juga dapat mempublikasikan (publish) nilai agar dapat dilihat oleh mahasiswa.
 *   **[Monitoring Kinerja](/monitoring-kinerja):** Memantau progres kehadiran dan logbook mahasiswa secara kolektif tanpa harus mengecek satu persatu di akun dosen.
 *   **[Berita Acara](/berita-acara):** Generate atau kelola berita acara setelah ujian dilaksanakan.
+
+---
+
+### 7. Manajemen Periode (Pergantian Tahun PBL)
+
+PBL berlangsung sekali setahun. Setiap periode (mis. **PBL 2026/2027**) menyimpan kelompok, logbook, absensi, laporan, jadwal ujian, berita acara, dan nilainya sendiri. Mahasiswa, dosen, dan pembimbing hanya melihat **periode aktif**; periode yang sudah ditutup menjadi arsip yang hanya dapat dilihat admin.
+
+1. Buka menu **[Manajemen Periode](/manajemen-periode)**.
+2. Pada **Mulai Periode Baru**, isi tahun ajaran baru (format `2026/2027`) dan pilih nilai huruf minimum lulus, lalu klik **Evaluasi Mahasiswa**.
+3. Periksa daftar evaluasi. Mahasiswa dianggap **lulus** bila sudah tergabung dalam kelompok, nilai akhirnya sudah di-*publish*, dan nilai hurufnya tidak di bawah batas. Selain itu (belum masuk kelompok, nilai belum di-*publish*, atau nilai di bawah batas) mahasiswa **disalin ke periode baru** sebagai calon anggota kelompok bertanda "mengulang". Centang/hapus centang untuk mengoreksi.
+4. Klik **Tutup ... & Mulai PBL ...** lalu konfirmasi. Periode lama ditutup, periode baru langsung aktif.
+5. Setelah periode baru aktif: buat kelompok di [Manajemen Kelompok](/manajemen-kelompok), lalu buka pendaftaran ujian di [Manajemen Ujian](/manajemen-ujian) bila waktunya tiba (pendaftaran periode baru ditutup secara default). Daftar syarat berkas ujian disalin dari periode sebelumnya.
+
+**Melihat arsip:** pilih periode lama pada pemilih periode di bagian atas layar (atau tombol **Lihat** di Manajemen Periode). Semua halaman admin akan menampilkan data periode tersebut dan muncul banner "arsip". Perubahan yang Anda simpan saat melihat arsip tercatat pada periode arsip itu. Klik **Kembali ke periode aktif** untuk kembali.
+
+> Jangan gunakan **Reset Sistem** di Dashboard untuk memulai tahun baru — tombol itu menghapus seluruh data termasuk arsip.
 
 ---
 ---

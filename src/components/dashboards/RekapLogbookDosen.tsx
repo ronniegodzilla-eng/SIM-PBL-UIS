@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../../contexts/PeriodContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
@@ -10,13 +11,14 @@ import autoTable from 'jspdf-autotable';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 
 export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
+  const { periodId } = usePeriod();
   const [logbooks, setLogbooks] = useState<any[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [students, setStudents] = useState<any>({});
   const [uniqueStudentIds, setUniqueStudentIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (groups.length === 0) return;
+    if (groups.length === 0 || !periodId) return;
 
     // Fetch all students to map names
     const qStudents = query(collection(db, 'users'), where('role', '==', 'Mahasiswa'));
@@ -31,7 +33,7 @@ export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
     const groupIds = groups.map(g => g.id);
 
     // Fetch members for these groups locally
-    const qMembers = query(collection(db, 'group_members'));
+    const qMembers = periodQuery('group_members', periodId);
     const unsubMembers = onSnapshot(qMembers, (snapshot) => {
       const sIds: string[] = [];
       snapshot.forEach(doc => {
@@ -45,7 +47,7 @@ export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
       setUniqueStudentIds(sIds);
 
       // Fetch ONLY Approved logbooks filtered by student_id
-      const qLogbooks = query(collection(db, 'logbooks'), where('status', '==', 'Approved'));
+      const qLogbooks = periodQuery('logbooks', periodId, where('status', '==', 'Approved'));
       const unsubLogs = onSnapshot(qLogbooks, (snapLogs) => {
         const logs: any[] = [];
         snapLogs.forEach((lDoc) => {
@@ -58,7 +60,7 @@ export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
       });
 
       // Fetch ONLY Approved attendances filtered by student_id
-      const qAttendances = query(collection(db, 'attendances'), where('status', '==', 'Approved'));
+      const qAttendances = periodQuery('attendances', periodId, where('status', '==', 'Approved'));
       const unsubAtts = onSnapshot(qAttendances, (snapAtts) => {
         const atts: any[] = [];
         snapAtts.forEach((aDoc) => {
@@ -80,7 +82,7 @@ export const RekapLogbookDosen = ({ groups }: { groups: any[] }) => {
       unsubStudents();
       unsubMembers();
     };
-  }, [groups]);
+  }, [groups, periodId]);
 
   const handleExportPDF = (studentId: string) => {
     const student = students[studentId];

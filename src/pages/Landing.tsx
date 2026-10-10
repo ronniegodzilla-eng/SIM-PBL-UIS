@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, getDocs, query, where } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../contexts/PeriodContext';
 import { auth, db } from '../firebase';
 import { buttonVariants } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -10,6 +11,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 
 export const Landing = () => {
   const [searchParams] = useSearchParams();
+  const { activePeriodId, activePeriod, loading: periodLoading } = usePeriod();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -49,7 +51,9 @@ export const Landing = () => {
   useEffect(() => {
     // Tunggu status login diketahui dulu, supaya koleksi yang aksesnya
     // butuh login (logbooks/attendances) tidak dibaca sebagai anonim.
-    if (!authReady) return;
+    if (!authReady || periodLoading) return;
+    // Halaman depan selalu menampilkan periode aktif (bukan arsip).
+    const periodId = activePeriodId;
 
     const fetchData = async () => {
       let mCount = 0;
@@ -64,7 +68,6 @@ export const Landing = () => {
         usersSnap.forEach(doc => {
           const data = doc.data();
           usersData[doc.id] = data;
-          if (data.role === 'Mahasiswa') mCount++;
           if (['Dosen'].includes(data.role)) dCount++;
         });
         setUsers(usersData);
@@ -72,9 +75,17 @@ export const Landing = () => {
         console.warn("Failed fetching users", e);
       }
 
+      if (!periodId) {
+        // Belum ada periode aktif: data PBL dikosongkan.
+        setGroups([]);
+        setGroupMembers([]);
+        setExamSchedules([]);
+        setLogbooks([]);
+        setAttendances([]);
+      } else {
       try {
         // Fetch Groups
-        const groupsSnap = await getDocs(collection(db, 'pbl_groups'));
+        const groupsSnap = await getDocs(periodQuery('pbl_groups', periodId));
         const groupsData: any[] = [];
         groupsSnap.forEach(doc => groupsData.push({ id: doc.id, ...doc.data() }));
         setGroups(groupsData);
@@ -85,17 +96,19 @@ export const Landing = () => {
 
       try {
         // Fetch Group Members (Approved only)
-        const membersSnap = await getDocs(query(collection(db, 'group_members'), where('status', '==', 'Approved')));
+        const membersSnap = await getDocs(periodQuery('group_members', periodId, where('status', '==', 'Approved')));
         const membersData: any[] = [];
         membersSnap.forEach(doc => membersData.push({ id: doc.id, ...doc.data() }));
         setGroupMembers(membersData);
+        // Jumlah mahasiswa = peserta PBL periode aktif (bukan seluruh akun).
+        mCount = new Set(membersData.map(m => m.student_id)).size;
       } catch (e) {
         console.warn("Failed fetching members", e);
       }
 
       try {
         // Fetch Exams
-        const examSnap = await getDocs(collection(db, 'exam_schedules'));
+        const examSnap = await getDocs(periodQuery('exam_schedules', periodId));
         const examData: any[] = [];
         examSnap.forEach(doc => examData.push({ id: doc.id, ...doc.data() }));
         
@@ -111,7 +124,7 @@ export const Landing = () => {
       if (currentUser) {
         try {
           // Fetch Logbooks
-          const logbooksSnap = await getDocs(collection(db, 'logbooks'));
+          const logbooksSnap = await getDocs(periodQuery('logbooks', periodId));
           const logbooksData: any[] = [];
           logbooksSnap.forEach(doc => logbooksData.push({ id: doc.id, ...doc.data() }));
           setLogbooks(logbooksData);
@@ -122,7 +135,7 @@ export const Landing = () => {
 
         try {
           // Fetch Attendances
-          const attSnap = await getDocs(collection(db, 'attendances'));
+          const attSnap = await getDocs(periodQuery('attendances', periodId));
           const attData: any[] = [];
           attSnap.forEach(doc => attData.push({ id: doc.id, ...doc.data() }));
           setAttendances(attData);
@@ -132,6 +145,7 @@ export const Landing = () => {
       } else {
         setLogbooks([]);
         setAttendances([]);
+      }
       }
 
       try {
@@ -156,7 +170,7 @@ export const Landing = () => {
     };
 
     fetchData();
-  }, [authReady, currentUser]);
+  }, [authReady, currentUser, activePeriodId, periodLoading]);
 
   const groupsK3 = groups.filter(g => g.prodi === 'S1 Kesehatan dan Keselamatan Kerja');
   const groupsKesling = groups.filter(g => g.prodi === 'S1 Kesehatan Lingkungan');
@@ -284,7 +298,7 @@ export const Landing = () => {
         <section className="space-y-6">
           <div className="flex items-center gap-2">
             <Activity className="w-6 h-6 text-teal-600" />
-            <h2 className="text-2xl font-bold text-slate-800">Infografis Progress PBL</h2>
+            <h2 className="text-2xl font-bold text-slate-800">Infografis Progress {activePeriod?.name || 'PBL'}</h2>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             <Card className="border-t-4 border-t-teal-500 shadow-sm">

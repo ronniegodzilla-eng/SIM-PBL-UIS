@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../contexts/PeriodContext';
 import { ArrowUp, ArrowDown, Pencil, Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -16,18 +17,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ExamRegistrationSettings, isRegistrationOpen, formatDeadline, timestampToLocalInput, localInputToTimestamp } from '../lib/examRegistration';
 
+// Data lama bisa berisi entri kembar yang hanya beda spasi (era sebelum
+// trim) — tampilkan satu saja agar konsisten.
+const dedupeReqs = (arr: any[] | undefined) => {
+  const out: string[] = [];
+  for (const v of arr || []) {
+    const t = String(v).trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+};
+
 export const ManajemenUjian = () => {
+  const { periodId, period } = usePeriod();
   const [reports, setReports] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [dosenPenguji, setDosenPenguji] = useState<any[]>([]);
-  const [settings, setSettings] = useState<{ exam: string[], revisi: string[] }>({ exam: [], revisi: [] });
+  // Persyaratan berkas & deadline pendaftaran ujian disimpan per periode.
+  const settings = { exam: dedupeReqs(period?.requirements?.exam), revisi: dedupeReqs(period?.requirements?.revisi) };
   const [examReqInput, setExamReqInput] = useState('');
   const [revisiReqInput, setRevisiReqInput] = useState('');
   const [editReq, setEditReq] = useState<{ type: 'exam' | 'revisi'; index: number; value: string } | null>(null);
   
   // Pengaturan deadline pendaftaran ujian
-  const [regSettings, setRegSettings] = useState<ExamRegistrationSettings | null>(null);
+  const regSettings: ExamRegistrationSettings | null = period?.exam_registration || null;
   const [regMode, setRegMode] = useState<'auto' | 'open' | 'closed'>('auto');
   const [regOpenAt, setRegOpenAt] = useState('');
   const [regCloseAt, setRegCloseAt] = useState('');
@@ -39,8 +53,14 @@ export const ManajemenUjian = () => {
   const [newSchedule, setNewSchedule] = useState({ date: '', time: '', room: '', penguji_id: '' });
 
   useEffect(() => {
+    if (!periodId) {
+      setGroups([]);
+      setReports([]);
+      setSchedules([]);
+      return;
+    }
     // Fetch Groups
-    const qGroups = query(collection(db, 'pbl_groups'));
+    const qGroups = periodQuery('pbl_groups', periodId);
     const unsubGroups = onSnapshot(qGroups, (snapshot) => {
       const g: any[] = [];
       snapshot.forEach((doc) => g.push({ id: doc.id, ...doc.data() }));
@@ -48,7 +68,7 @@ export const ManajemenUjian = () => {
     });
 
     // Fetch Reports
-    const qReports = query(collection(db, 'pbl_reports'));
+    const qReports = periodQuery('pbl_reports', periodId);
     const unsubReports = onSnapshot(qReports, (snapshot) => {
       const r: any[] = [];
       snapshot.forEach((doc) => r.push({ id: doc.id, ...doc.data() }));
@@ -56,7 +76,7 @@ export const ManajemenUjian = () => {
     });
 
     // Fetch Schedules
-    const qSchedules = query(collection(db, 'exam_schedules'));
+    const qSchedules = periodQuery('exam_schedules', periodId);
     const unsubSchedules = onSnapshot(qSchedules, (snapshot) => {
       const s: any[] = [];
       snapshot.forEach((doc) => s.push({ id: doc.id, ...doc.data() }));
@@ -76,48 +96,28 @@ export const ManajemenUjian = () => {
       setDosenPenguji(p);
     });
 
-    // Fetch Settings. Data lama bisa berisi entri kembar yang hanya beda
-    // spasi (era sebelum trim) — tampilkan satu saja agar konsisten.
-    const dedupeReqs = (arr: any[]) => {
-      const out: string[] = [];
-      for (const v of arr || []) {
-        const t = String(v).trim();
-        if (t && !out.includes(t)) out.push(t);
-      }
-      return out;
-    };
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'requirements'), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setSettings({ exam: dedupeReqs(data.exam), revisi: dedupeReqs(data.revisi) });
-      }
-    });
-
-    // Fetch pengaturan deadline pendaftaran ujian
-    const unsubReg = onSnapshot(doc(db, 'settings', 'exam_registration'), (snap) => {
-      const data = snap.exists() ? (snap.data() as ExamRegistrationSettings) : null;
-      setRegSettings(data);
-      setRegMode(data?.mode || 'auto');
-      setRegOpenAt(timestampToLocalInput(data?.open_at));
-      setRegCloseAt(timestampToLocalInput(data?.close_at));
-      setRegNote(data?.note || '');
-    });
-
     return () => {
       unsubGroups();
       unsubReports();
       unsubSchedules();
       unsubPenguji();
-      unsubSettings();
-      unsubReg();
     };
-  }, []);
+  }, [periodId]);
+
+  // Isi ulang formulir deadline saat pengaturan periode berubah.
+  useEffect(() => {
+    setRegMode(regSettings?.mode || 'auto');
+    setRegOpenAt(timestampToLocalInput(regSettings?.open_at));
+    setRegCloseAt(timestampToLocalInput(regSettings?.close_at));
+    setRegNote(regSettings?.note || '');
+  }, [periodId, regSettings?.mode, regSettings?.open_at?.toMillis(), regSettings?.close_at?.toMillis(), regSettings?.note]);
 
   const handleSaveSchedule = async () => {
     if (!selectedGroupId || !newSchedule.date || !newSchedule.time || !newSchedule.room || !newSchedule.penguji_id) {
       toast.error('Mohon lengkapi semua data jadwal.');
       return;
     }
+    if (!periodId) return;
 
     // Detect conflicts terhadap data TERBARU dari server (bukan state lokal
     // yang bisa basi) untuk memperkecil peluang bentrok saat dua admin
@@ -127,7 +127,7 @@ export const ManajemenUjian = () => {
 
     let latestSchedules = schedules;
     try {
-      const freshSnap = await getDocs(collection(db, 'exam_schedules'));
+      const freshSnap = await getDocs(periodQuery('exam_schedules', periodId));
       latestSchedules = freshSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
     } catch { /* jika gagal, pakai state lokal sebagai fallback */ }
 
@@ -167,6 +167,7 @@ export const ManajemenUjian = () => {
       const scheduleId = `exam_${selectedGroupId}`;
       await setDoc(doc(db, 'exam_schedules', scheduleId), {
         group_id: selectedGroupId,
+        period_id: periodId,
         date: newSchedule.date,
         time: newSchedule.time,
         room: newSchedule.room,
@@ -185,14 +186,17 @@ export const ManajemenUjian = () => {
   };
 
   const handleSaveRegSettings = async () => {
+    if (!periodId) return;
     try {
       setSavingReg(true);
-      await setDoc(doc(db, 'settings', 'exam_registration'), {
-        mode: regMode,
-        open_at: localInputToTimestamp(regOpenAt),
-        close_at: localInputToTimestamp(regCloseAt),
-        note: regNote.trim()
-      }, { merge: true });
+      await updateDoc(doc(db, 'periods', periodId), {
+        exam_registration: {
+          mode: regMode,
+          open_at: localInputToTimestamp(regOpenAt),
+          close_at: localInputToTimestamp(regCloseAt),
+          note: regNote.trim()
+        }
+      });
       toast.success('Pengaturan deadline pendaftaran disimpan');
     } catch (error) {
       toast.error('Gagal menyimpan pengaturan deadline');
@@ -209,9 +213,10 @@ export const ManajemenUjian = () => {
     mutate: (arr: string[]) => string[] | null,
     successMsg: string
   ) => {
+    if (!periodId) return;
     try {
-      const snap = await getDoc(doc(db, 'settings', 'requirements'));
-      const raw: any[] = (snap.exists() ? snap.data()[type] : []) || [];
+      const snap = await getDoc(doc(db, 'periods', periodId));
+      const raw: any[] = (snap.exists() ? snap.data().requirements?.[type] : []) || [];
       const normalized: string[] = [];
       for (const v of raw) {
         const t = String(v).trim();
@@ -219,7 +224,7 @@ export const ManajemenUjian = () => {
       }
       const next = mutate(normalized);
       if (next === null) return;
-      await setDoc(doc(db, 'settings', 'requirements'), { [type]: next }, { merge: true });
+      await updateDoc(doc(db, 'periods', periodId), { [`requirements.${type}`]: next });
       toast.success(successMsg);
     } catch (error: any) {
       console.error(error);

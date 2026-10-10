@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { where, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { periodQuery } from '../../contexts/PeriodContext';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -22,11 +23,14 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
   const [newAttendance, setNewAttendance] = useState({ date: '', type: 'Lapangan', is_present: true, other_text: '' });
   const [documentationFile, setDocumentationFile] = useState<File | null>(null);
 
+  // Periode mengikuti keanggotaan kelompok mahasiswa.
+  const periodId: string | undefined = groupMember?.period_id;
+
   useEffect(() => {
-    if (!profile || !groupMember) return;
+    if (!profile || !groupMember || !periodId) return;
 
     // Listen for logbooks
-    const qLogbooks = query(collection(db, 'logbooks'), where('student_id', '==', profile.uid));
+    const qLogbooks = periodQuery('logbooks', periodId, where('student_id', '==', profile.uid));
     const unsubLogbooks = onSnapshot(qLogbooks, (snapshot) => {
       const logs: any[] = [];
       snapshot.forEach((doc) => logs.push({ id: doc.id, ...doc.data() }));
@@ -34,7 +38,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'logbooks'));
 
     // Listen for attendances
-    const qAttendances = query(collection(db, 'attendances'), where('student_id', '==', profile.uid));
+    const qAttendances = periodQuery('attendances', periodId, where('student_id', '==', profile.uid));
     const unsubAttendances = onSnapshot(qAttendances, (snapshot) => {
       const atts: any[] = [];
       snapshot.forEach((doc) => atts.push({ id: doc.id, ...doc.data() }));
@@ -45,7 +49,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
       unsubLogbooks();
       unsubAttendances();
     };
-  }, [profile, groupMember]);
+  }, [profile, groupMember, periodId]);
 
   const handleAddLogbook = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +61,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
       
       await setDoc(doc(db, 'logbooks', logbookId), {
         group_member_id: groupMember.id,
+        period_id: groupMember.period_id,
         student_id: profile.uid,
         activity_date: newLogbook.activity_date,
         description: newLogbook.description,
@@ -95,6 +100,7 @@ export const LogbookAbsensi = ({ groupMember }: { groupMember: any }) => {
 
       const attData: any = {
         group_member_id: groupMember.id,
+        period_id: groupMember.period_id,
         student_id: profile.uid,
         date: newAttendance.date,
         type: newAttendance.type,

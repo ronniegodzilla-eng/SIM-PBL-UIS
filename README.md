@@ -36,6 +36,10 @@ Aplikasi di-deploy ke **Vercel**. Environment variable yang dibutuhkan dan
 langkah pengamanan endpoint upload dijelaskan di
 [docs/SECURITY_SETUP.md](docs/SECURITY_SETUP.md).
 
+Data PBL dipisah per **periode** (satu periode = satu tahun PBL). Model data,
+cara pergantian periode, dan **langkah deploy pertama kali (wajib berurutan)**
+ada di [docs/PERIODE_PBL.md](docs/PERIODE_PBL.md).
+
 Aturan akses data ada di `firestore.rules` — setiap perubahan file ini harus
 di-publish manual ke Firebase Console (Firestore Database → pilih database
 `ai-studio-ab4461e6-...` → Rules).
@@ -46,7 +50,8 @@ di-publish manual ke Firebase Console (Firestore Database → pilih database
 api/                  Serverless functions (proxy Gemini)
 src/
   components/         Komponen UI & dashboard per fitur
-  contexts/           AuthContext (login, profil, peran)
+  contexts/           AuthContext (login, profil, peran), PeriodContext (periode aktif/arsip)
+  hooks/              useMyMembership (keanggotaan mahasiswa pada periode aktif)
   pages/              Halaman per route
   lib/                Utilitas (upload berkas, dsb.)
   docs/               Panduan pengguna per peran

@@ -9,6 +9,18 @@ import { toast } from 'sonner';
 import { Badge } from '../ui/badge';
 import { uploadToGoogleDrive } from '../../lib/uploadFile';
 import { ExamRegistrationSettings, isRegistrationOpen, formatDeadline } from '../../lib/examRegistration';
+import { usePeriod } from '../../contexts/PeriodContext';
+
+// Samakan dengan sisi admin: entri kembar yang hanya beda spasi
+// (data lama) ditampilkan satu saja.
+const dedupeReqs = (arr: any[] | undefined) => {
+  const out: string[] = [];
+  for (const v of arr || []) {
+    const t = String(v).trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+};
 
 export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
   const { profile } = useAuth();
@@ -18,11 +30,13 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
   const [drafFile, setDrafFile] = useState<File | null>(null);
   const [reportTitle, setReportTitle] = useState('');
   
-  const [settings, setSettings] = useState<{ exam: string[], revisi: string[] }>({ exam: [], revisi: [] });
   const [examFiles, setExamFiles] = useState<{ [key: string]: File | null }>({});
   const [revisiFiles, setRevisiFiles] = useState<{ [key: string]: File | null }>({});
   const [groupInfo, setGroupInfo] = useState<any>(null);
-  const [regSettings, setRegSettings] = useState<ExamRegistrationSettings | null>(null);
+  // Persyaratan berkas & jadwal pendaftaran ujian kini melekat pada periode.
+  const { period } = usePeriod();
+  const settings = { exam: dedupeReqs(period?.requirements?.exam), revisi: dedupeReqs(period?.requirements?.revisi) };
+  const regSettings: ExamRegistrationSettings | null = period?.exam_registration || null;
   const [now, setNow] = useState(new Date());
 
   // Evaluasi ulang status buka/tutup tiap 30 detik agar deadline yang lewat
@@ -64,33 +78,10 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
       }
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'exam_schedules'));
 
-    // Samakan dengan sisi admin: entri kembar yang hanya beda spasi
-    // (data lama) ditampilkan satu saja.
-    const dedupeReqs = (arr: any[]) => {
-      const out: string[] = [];
-      for (const v of arr || []) {
-        const t = String(v).trim();
-        if (t && !out.includes(t)) out.push(t);
-      }
-      return out;
-    };
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'requirements'), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setSettings({ exam: dedupeReqs(data.exam), revisi: dedupeReqs(data.revisi) });
-      }
-    });
-
-    const unsubReg = onSnapshot(doc(db, 'settings', 'exam_registration'), (snap) => {
-      setRegSettings(snap.exists() ? (snap.data() as ExamRegistrationSettings) : null);
-    });
-
     return () => {
       unsubGroup();
       unsubReport();
       unsubExam();
-      unsubSettings();
-      unsubReg();
     };
   }, [profile, groupMember]);
 
@@ -142,6 +133,7 @@ export const PendaftaranUjian = ({ groupMember }: { groupMember: any }) => {
         custom_exam_urls: customUrls,
         registered_at: new Date().toISOString(),
         status: 'Pending',
+        period_id: groupMember.period_id,
         report_url: report.report_url || '',
         createdAt: report.createdAt || new Date().toISOString()
       }, { merge: true });

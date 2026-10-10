@@ -8,6 +8,15 @@ import { auth } from '../firebase';
 // bukan sekadar batas teoretis Apps Script.
 const MAX_FILE_MB = 10;
 
+// Nama subfolder Drive untuk periode PBL yang sedang dipakai. Diisi oleh
+// PeriodProvider; Apps Script menyimpan berkas ke subfolder ini (dibuat bila
+// belum ada). Script versi lama mengabaikan field ini sehingga tetap aman.
+let uploadFolder: string | null = null;
+
+export function setUploadFolder(name: string | null) {
+  uploadFolder = name;
+}
+
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -52,7 +61,8 @@ export async function uploadToGoogleDrive(file: File, prefix: string): Promise<s
       filename: filename,
       mimeType: file.type,
       base64: base64,
-      idToken: idToken
+      idToken: idToken,
+      folder: uploadFolder
     }),
     headers: {
       'Content-Type': 'text/plain;charset=utf-8',

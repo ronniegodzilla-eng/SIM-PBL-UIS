@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { periodQuery, usePeriod } from '../contexts/PeriodContext';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { logout, db, storage, handleFirestoreError, OperationType, auth } from '../firebase';
 import { updatePassword } from 'firebase/auth';
 import { doc, updateDoc, getDocs, query, collection, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Button } from './ui/button';
-import { LogOut, User as UserIcon, LayoutDashboard, Settings, X, Users, UserCog, UsersIcon, Group, FileText, Calendar, Menu, Home } from 'lucide-react';
+import { LogOut, User as UserIcon, LayoutDashboard, Settings, X, Users, UserCog, UsersIcon, Group, FileText, Calendar, Menu, Home, CalendarRange, Archive } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +27,7 @@ import { uploadToGoogleDrive } from '../lib/uploadFile';
 
 export const Layout = () => {
   const { user, profile, loading, isImpersonating, stopImpersonating, originalProfile } = useAuth();
+  const { periodId, period, periods, activePeriodId, isArchive, canSelectPeriod, setSelectedPeriodId, loading: periodLoading } = usePeriod();
   const navigate = useNavigate();
   const location = useLocation();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -45,17 +48,23 @@ export const Layout = () => {
   useEffect(() => {
     const checkRoles = async () => {
       if (!profile || profile.role !== 'Dosen') return;
+      if (!periodId) {
+        setIsDPL(false);
+        setIsPenguji(false);
+        setIsPL(false);
+        return;
+      }
 
       try {
-        const pblQuery = query(collection(db, 'pbl_groups'), where('dsn_pembimbing_id', '==', profile.uid));
+        const pblQuery = periodQuery('pbl_groups', periodId, where('dsn_pembimbing_id', '==', profile.uid));
         const pblSnap = await getDocs(pblQuery);
         setIsDPL(!pblSnap.empty);
 
-        const examQuery = query(collection(db, 'exam_schedules'), where('penguji_id', '==', profile.uid));
+        const examQuery = periodQuery('exam_schedules', periodId, where('penguji_id', '==', profile.uid));
         const examSnap = await getDocs(examQuery);
         setIsPenguji(!examSnap.empty);
 
-        const plQuery = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+        const plQuery = periodQuery('pbl_groups', periodId, where('pmb_lapangan_id', '==', profile.uid));
         const plSnap = await getDocs(plQuery);
         setIsPL(!plSnap.empty);
       } catch (error) {
@@ -64,7 +73,7 @@ export const Layout = () => {
     };
 
     checkRoles();
-  }, [profile]);
+  }, [profile, periodId]);
 
   useEffect(() => {
     if (profile) {
@@ -201,6 +210,7 @@ export const Layout = () => {
     navItems.push({ name: 'Absensi Sosialisasi', path: '/penilaian', icon: FileText });
     navItems.push({ name: 'Rekap Nilai', path: '/rekap-nilai', icon: LayoutDashboard });
     navItems.push({ name: 'Monitoring Kinerja', path: '/monitoring-kinerja', icon: FileText });
+    navItems.push({ name: 'Manajemen Periode', path: '/manajemen-periode', icon: CalendarRange });
   }
 
   if (['PembimbingLapangan', 'Penguji'].includes(profile?.role || '') || (profile?.role === 'Dosen' && (isDPL || isPenguji || isPL))) {
@@ -356,6 +366,31 @@ export const Layout = () => {
                 </SheetContent>
               </Sheet>
             </nav>
+
+            {canSelectPeriod && periods.length > 0 ? (
+              <Select
+                value={periodId || ''}
+                onValueChange={(val: any) => setSelectedPeriodId(val === activePeriodId ? null : val)}
+              >
+                <SelectTrigger className="w-[220px] h-9 text-sm">
+                  <SelectValue placeholder="Pilih periode">
+                    {period ? `${period.name}${period.id === activePeriodId ? ' (aktif)' : ''}` : 'Pilih periode'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {periods.map(p => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}{p.id === activePeriodId ? ' (aktif)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : period ? (
+              <div className="hidden sm:flex items-center gap-2 text-sm text-slate-600">
+                <CalendarRange className="w-4 h-4" />
+                {period.name}
+              </div>
+            ) : null}
           </div>
           
           <div className="flex items-center gap-3">
@@ -471,6 +506,27 @@ export const Layout = () => {
                    
           </div>
         </header>
+
+        {isArchive && period && (
+          <div className="bg-slate-700 text-white px-4 py-2 flex flex-col sm:flex-row items-center justify-between shrink-0 gap-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Archive className="w-4 h-4" />
+              Anda sedang melihat arsip <strong>{period.name}</strong>. Perubahan yang Anda simpan akan tercatat pada periode ini, bukan periode aktif.
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => setSelectedPeriodId(null)} className="w-full sm:w-auto">
+              Kembali ke periode aktif
+            </Button>
+          </div>
+        )}
+        {!periodLoading && !activePeriodId && (
+          <div className="bg-amber-500 text-white px-4 py-2 shrink-0 text-sm text-center">
+            {canSelectPeriod ? (
+              <>Belum ada periode PBL yang aktif. Buka <Link to="/manajemen-periode" className="underline font-semibold">Manajemen Periode</Link> untuk mengaktifkan periode.</>
+            ) : (
+              <>Belum ada periode PBL yang aktif. Data PBL akan tampil setelah admin mengaktifkan periode.</>
+            )}
+          </div>
+        )}
 
         {/* Content Body */}
         <main className="flex-1 overflow-auto p-4 md:p-8 relative">

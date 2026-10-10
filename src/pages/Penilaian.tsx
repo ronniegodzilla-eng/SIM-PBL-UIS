@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, getDocs, setDoc, doc, where } from 'firebase/firestore';
+import { periodQuery, usePeriod } from '../contexts/PeriodContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -14,6 +15,7 @@ import { Search, ArrowUp, ArrowDown } from 'lucide-react';
 
 export const Penilaian = () => {
   const { profile } = useAuth();
+  const { periodId, period } = usePeriod();
   const [groups, setGroups] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
@@ -24,20 +26,11 @@ export const Penilaian = () => {
   const [loading, setLoading] = useState(false);
   const [graderRoleKey, setGraderRoleKey] = useState('DosenPenguji');
   const [pengujiGroupIds, setPengujiGroupIds] = useState<string[]>([]);
-  const [isEditActive, setIsEditActive] = useState(false);
+  // Saklar "edit nilai" berlaku per periode.
+  const isEditActive = !!period?.is_edit_active;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' }>({ field: 'name', direction: 'asc' });
-
-  useEffect(() => {
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'main'), (doc) => {
-      if (doc.exists()) {
-        setIsEditActive(doc.data().is_edit_active || false);
-      }
-    });
-
-    return () => unsubSettings();
-  }, [])
 
   useEffect(() => {
     if (!profile) return;
@@ -72,16 +65,18 @@ export const Penilaian = () => {
   }, [graderRoleKey]);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !periodId) return;
 
     let qGroups;
     if (profile.role === 'PembimbingLapangan') {
-      qGroups = query(collection(db, 'pbl_groups'), where('pmb_lapangan_id', '==', profile.uid));
+      qGroups = periodQuery('pbl_groups', periodId, where('pmb_lapangan_id', '==', profile.uid));
     } else if (profile.role === 'Dosen' || profile.role === 'Admin' || profile.role === 'AdminProdi') {
-      qGroups = query(collection(db, 'pbl_groups')); 
+      qGroups = periodQuery('pbl_groups', periodId); 
     } else {
       return; 
     }
+
+    let unsubGrades: (() => void) | null = null;
 
     const unsubGroups = onSnapshot(qGroups, async (snapshot) => {
       let g: any[] = [];
@@ -89,7 +84,7 @@ export const Penilaian = () => {
 
       let pengujiIds: string[] = [];
       if (profile.role === 'Dosen') {
-        const qSchedules = query(collection(db, 'exam_schedules'), where('penguji_id', '==', profile.uid));
+        const qSchedules = periodQuery('exam_schedules', periodId, where('penguji_id', '==', profile.uid));
         const schedSnapshot = await getDocs(qSchedules);
         pengujiIds = schedSnapshot.docs.map(doc => doc.data().group_id);
         // Muat SEMUA relasi dosen ini: penguji, dosen pembimbing, dan
@@ -107,7 +102,7 @@ export const Penilaian = () => {
 
       // We still want to see their group name if they have one
       const groupIds = g.map(group => group.id);
-      const qMembers = query(collection(db, 'group_members'), where('status', '==', 'Approved'));
+      const qMembers = periodQuery('group_members', periodId, where('status', '==', 'Approved'));
       const memberSnapshot = await getDocs(qMembers);
       const members: any[] = [];
       const studentIdsInGroups: string[] = [];
@@ -131,10 +126,11 @@ export const Penilaian = () => {
       const finalStudentIds: string[] = [];
 
       studSnapshot.forEach(doc => {
+        // Hanya mahasiswa yang tergabung dalam kelompok pada periode ini
+        // (termasuk untuk Admin) — alumni periode lama tidak ikut tampil.
         const isTargeted = studentIdsInGroups.includes(doc.id);
-        const isAdmin = profile.role === 'Admin' || profile.role === 'AdminProdi';
-        
-        if (isTargeted || isAdmin) {
+
+        if (isTargeted) {
           studs.push({ id: doc.id, ...doc.data() });
           finalStudentIds.push(doc.id);
         }
@@ -142,9 +138,13 @@ export const Penilaian = () => {
 
       setStudents(studs);
 
+      if (unsubGrades) {
+        unsubGrades();
+        unsubGrades = null;
+      }
       if (finalStudentIds.length > 0) {
-        const qGrades = query(collection(db, 'grades'));
-        const unsubGrades = onSnapshot(qGrades, (gradeSnap) => {
+        const qGrades = periodQuery('grades', periodId);
+        unsubGrades = onSnapshot(qGrades, (gradeSnap) => {
           const gradesMap: any = {};
           gradeSnap.forEach(d => {
             const grad = d.data();
@@ -153,19 +153,21 @@ export const Penilaian = () => {
                // Kategori penguji bisa punya beberapa penilai; "Nilai Saya"
                // harus menampilkan nilai milik pengguna saat ini saja.
                if (grad.category === 'DosenPenguji' && grad.evaluator_id !== profile.uid) return;
-               gradesMap[grad.student_id][grad.category] = { score: grad.score, detail: grad.rubric_scores };
+               gradesMap[grad.student_id][grad.category] = { id: d.id, score: grad.score, detail: grad.rubric_scores };
             }
           });
           setGrades(gradesMap);
         });
-        return () => unsubGrades();
       } else {
         setGrades({});
       }
     });
 
-    return () => unsubGroups();
-  }, [profile]);
+    return () => {
+      unsubGroups();
+      if (unsubGrades) unsubGrades();
+    };
+  }, [profile, periodId]);
 
   const handleScoreChange = (critId: string, val: string) => {
      let num = Number(val);
@@ -176,7 +178,7 @@ export const Penilaian = () => {
 
   const handleSaveScore = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile || !selectedStudent) return;
+    if (!profile || !selectedStudent || !periodId) return;
 
     if (!rubric.criteria || rubric.criteria.length === 0) {
       toast.error('Rubrik belum dikonfigurasi. Hubungi Admin.');
@@ -196,11 +198,15 @@ export const Penilaian = () => {
       // Kategori penguji dapat dinilai lebih dari satu orang (dosen pembimbing
       // yang menguji + dosen penguji), jadi tiap penilai punya dokumen sendiri
       // agar tidak saling menimpa. Kategori lain hanya satu penilai.
-      const gradeId = graderRoleKey === 'DosenPenguji'
-        ? `${selectedStudent.id}_DosenPenguji_${profile.uid}`
-        : `${selectedStudent.id}_${graderRoleKey}`;
+      // Dokumen nilai yang sudah ada pada periode ini dipakai ulang (termasuk
+      // data lama tanpa prefiks periode); dokumen baru diberi prefiks periode
+      // agar nilai mahasiswa yang mengulang tidak menimpa periode sebelumnya.
+      const gradeId = grades[selectedStudent.id]?.[graderRoleKey]?.id || (graderRoleKey === 'DosenPenguji'
+        ? `${periodId}_${selectedStudent.id}_DosenPenguji_${profile.uid}`
+        : `${periodId}_${selectedStudent.id}_${graderRoleKey}`);
       await setDoc(doc(db, 'grades', gradeId), {
         student_id: selectedStudent.id,
+        period_id: periodId,
         group_member_id: mem?.id,
         evaluator_id: profile.uid,
         category: graderRoleKey,
@@ -224,12 +230,13 @@ export const Penilaian = () => {
   };
 
   const handleQuickSetSosialisasi = async (student: any, score: number) => {
-    if (!profile) return;
+    if (!profile || !periodId) return;
     try {
       const mem = groupMembers.find(m => m.student_id === student.id);
-      const gradeId = `${student.id}_Sosialisasi`;
+      const gradeId = grades[student.id]?.['Sosialisasi']?.id || `${periodId}_${student.id}_Sosialisasi`;
       await setDoc(doc(db, 'grades', gradeId), {
         student_id: student.id,
+        period_id: periodId,
         group_member_id: mem?.id,
         evaluator_id: profile.uid,
         category: 'Sosialisasi',
